@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Local database (contains user data)
+support_data.db
+*.db
+
+# macOS
+.DS_Store
+
+# Extra secret file types
+*.pem
+*.key
+service-account*.json
+credentials*.json
+
