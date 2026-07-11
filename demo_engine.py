@@ -14,6 +14,8 @@ hardcoded flows:
 The app keeps the state dict in session_state; next_turn returns (Turn, state).
 """
 
+from __future__ import annotations
+
 import re
 from datetime import datetime
 
@@ -83,19 +85,6 @@ SCOPE_QUICK = [kb.B("Just me", "Solo yo"), kb.B("Others too", "Otros también"),
 
 PRIORITY_ORDER = ["Low", "Medium", "High", "Urgent"]
 
-# Device inference: keyword -> device_type label (matches config.DEVICE_TYPES values)
-DEVICE_KEYWORDS = {
-    "chromebook": "Chromebook",
-    "macbook": "Mac", "imac": "Mac", " mac ": "Mac", "mac ": "Mac", "macos": "Mac",
-    "windows": "Windows laptop/desktop", "pc ": "Windows laptop/desktop", "laptop": "Windows laptop/desktop",
-    "desktop": "Windows laptop/desktop",
-    "ipad": "iPad / tablet", "tablet": "iPad / tablet",
-    "smartboard": "Smartboard / display", "smart board": "Smartboard / display",
-    "interactive display": "Smartboard / display", "promethean": "Smartboard / display",
-    "projector": "Smartboard / display",
-    "printer": "Printer / copier", "copier": "Printer / copier",
-    "phone": "Phone",
-}
 # KB entries whose issue is device-dependent. Only these prompt for device type.
 DEVICE_RELEVANT_CATEGORIES = {"Hardware", "Network", "Facilities & AV"}
 
@@ -354,6 +343,12 @@ class DemoEngine:
             if "error" in node["label"].lower() and user_text.strip().lower() not in (
                     "none", "ninguno", "no", "n/a", ""):
                 mem["error_message"] = user_text
+            # Confirm what was recorded so the user never wonders if a free-text
+            # answer was understood (audit finding: answers were consumed silently).
+            ans = user_text.strip().rstrip(".!?")
+            if ans and len(ans) <= 60:
+                state["pending_prefix"] = {"en": f"Thanks — noted: {ans}.",
+                                           "es": f"Gracias — anotado: {ans}."}[lang]
             state["idx"] += 1
             return self._serve_current(state, intake, lang, log), state
 
@@ -648,12 +643,19 @@ class DemoEngine:
              "difficulty": step["difficulty"], "visual": step.get("visual")}
         given = state["memory"]["troubleshooting_steps_given"]
         if not prefix:
-            intro = self.STEP_INTROS[lang][len(given) % len(self.STEP_INTROS[lang])]
-            # Naturally confirm the inferred device on the first step, if we have it.
-            dev = state["memory"].get("device_type")
-            if not given and dev and dev != config.DEVICE_TYPES["other"][0]:
-                intro = ({"en": f"Since this is a {dev}, ", "es": f"Como es un {dev}, "}[lang]
-                         + intro[0].lower() + intro[1:])
+            if state.get("failed_steps"):
+                # Acknowledge the failed attempt before offering the next step.
+                intro = {"en": "Okay, that one didn't do it — thanks for trying. "
+                               "Here's the next thing to try.",
+                         "es": "Bien, eso no lo resolvió — gracias por intentarlo. "
+                               "Aquí está lo siguiente que probar."}[lang]
+            else:
+                intro = self.STEP_INTROS[lang][len(given) % len(self.STEP_INTROS[lang])]
+                # Naturally confirm the inferred device on the first step, if we have it.
+                dev = state["memory"].get("device_type")
+                if not given and dev and dev != config.DEVICE_TYPES["other"][0]:
+                    intro = ({"en": f"Since this is a {dev}, ", "es": f"Como es un {dev}, "}[lang]
+                             + intro[0].lower() + intro[1:])
             prefix = intro
         # A queued restatement leads the message on the first step (if no question preceded it).
         queued = state.get("pending_prefix") or ""
@@ -710,14 +712,28 @@ class DemoEngine:
             log_entries=log, escalation_reason=reason)
 
     def _escalation_turn(self, entry, state, lang, log) -> Turn:
+        # The KB esc_reason is technician language ("reimage may be required");
+        # it goes to the log and ticket, never to the user (audit finding).
         reason_en = tr(entry["esc_reason"], "en")
+        tried = len(state.get("failed_steps") or [])
+        opener = {
+            "en": ("Thanks for trying those steps with me. The issue is still there, and the "
+                   "remaining checks need a technician's tools and access — so I won't keep "
+                   "you trying things that won't help." if tried else
+                   "This one is best handled directly by a technician."),
+            "es": ("Gracias por intentar esos pasos conmigo. El problema sigue, y las "
+                   "verificaciones restantes requieren las herramientas y los accesos de un "
+                   "técnico — así que no le haré seguir intentando cosas que no ayudarán."
+                   if tried else
+                   "Esto es mejor que lo atienda directamente un técnico."),
+        }[lang]
         reply = {
-            "en": f"{tr(entry['esc_reason'], lang)} I can put together a support-ready summary "
-                  "with everything we've covered. Details you can copy into your official "
-                  "support request so IT has a clear starting point.",
-            "es": f"{tr(entry['esc_reason'], lang)} Puedo preparar un resumen listo para soporte "
-                  "con todo lo que revisamos. Detalles que puede copiar en su solicitud oficial "
-                  "para que TI tenga un punto de partida claro.",
+            "en": f"{opener} I can put together a support-ready summary of everything we "
+                  "covered — details you can copy into your official support request so you "
+                  "don't have to explain it twice.",
+            "es": f"{opener} Puedo preparar un resumen listo para soporte con todo lo que "
+                  "revisamos — detalles que puede copiar en su solicitud oficial para que no "
+                  "tenga que explicarlo dos veces.",
         }[lang]
         if entry.get("esc_extra"):
             reply += "\n\n" + tr(entry["esc_extra"], lang)
@@ -793,8 +809,20 @@ def demo_ticket(intake: dict, log: list[dict], state: dict, reason: str, lang: s
         scope_txt = "Single user (scope not explicitly confirmed)"
     impact_txt = f"{scope_txt}. Operational impact: {_impact_phrase(issue_text)}."
 
-    location = ", ".join(x for x in [intake.get("campus"), intake.get("building"), intake.get("room")] if x) \
-               or "Not provided"
+    # Human-readable location. Never emit bare number fragments like
+    # "Lincoln Elementary, 2, 114" (audit finding: mangled location in ticket).
+    loc_bits = []
+    if intake.get("campus") and intake["campus"] != "Not provided":
+        loc_bits.append(intake["campus"])
+    bldg = str(intake.get("building") or "").strip()
+    if bldg:
+        loc_bits.append(bldg if bldg.lower().startswith(("building", "edificio"))
+                        else f"Building {bldg}")
+    room = str(intake.get("room") or "").strip()
+    if room and room not in loc_bits:
+        loc_bits.append(f"Room {room}" if re.fullmatch(r"[0-9]{1,5}[a-z]?", room.lower())
+                        else room)
+    location = ", ".join(loc_bits) or "Not provided"
     errors = [d.split(":", 1)[1].strip() for d in info
               if "error" in d.split(":", 1)[0].lower()
               and d.split(":", 1)[1].strip().lower() not in ("none", "ninguno", "no", "n/a", "")]
@@ -820,8 +848,13 @@ def demo_ticket(intake: dict, log: list[dict], state: dict, reason: str, lang: s
         + f"Escalated because: {reason}"
     )
 
+    # The user's own words always travel with the ticket, so a routing mistake
+    # can never erase what was actually reported (audit finding).
+    reported = (mem.get("issue_summary") or "").strip()
+
     return {
         "title": f"{tr(entry['issue'], 'en')}, {intake.get('campus', '')}".rstrip(", "),
+        "user_reported": reported,
         "executive_summary": (
             f"{tr(entry['issue'], 'en')} affecting "
             f"{'multiple users' if state.get('multiuser') else 'one user'} "

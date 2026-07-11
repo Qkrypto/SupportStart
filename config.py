@@ -1,5 +1,7 @@
 """Application configuration and enterprise reference data."""
 
+from __future__ import annotations
+
 import os
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,8 @@ is the offline equivalent. Both produce the same dict shape and
 ticket_to_markdown() renders either.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
 
@@ -136,6 +138,8 @@ def summary_to_text(t: dict) -> str:
         for s in t.get("troubleshooting_performed", [])
     ) or "  - None"
     loc = t.get("user_location", "Not provided")
+    reported = (t.get("user_reported") or "").strip()
+    reported_block = f'\nReported in the user\'s words:\n  "{reported}"\n' if reported else ""
     return f"""SUPPORT SUMMARY
 Prepared by {config.APP_NAME} · {t.get('created_at', '')}
 
@@ -144,7 +148,7 @@ Issue: {t['title']}
 Requester: {t.get('user_name', 'Not provided')} ({t.get('user_role', 'Not provided')})
 Email: {t.get('user_email', 'Not provided')}
 Location: {loc}
-
+{reported_block}
 What's happening:
   {t.get('executive_summary', '')}
 
@@ -164,6 +168,8 @@ def ticket_to_markdown(t: dict) -> str:
     pr_desc = config.PRIORITIES.get(pr, ("",))[0]
 
     # Optional sections, only rendered when present (keeps AI + demo shapes compatible).
+    reported = (t.get("user_reported") or "").strip()
+    reported_block = f'\nUSER\'S DESCRIPTION (VERBATIM)\n  "{reported}"\n' if reported else ""
     os_line = f"\nOPERATING SYSTEM\n  {t['operating_system']}\n" if t.get("operating_system") else ""
     scope_line = f"\nAFFECTED SCOPE\n  {t['affected_scope']}\n" if t.get("affected_scope") else ""
     tech_needs = t.get("technician_needs") or []
@@ -194,7 +200,7 @@ REQUESTER
 
 EXECUTIVE SUMMARY
   {t['executive_summary']}
-
+{reported_block}
 DETAILED DESCRIPTION
   {t['detailed_description']}
 

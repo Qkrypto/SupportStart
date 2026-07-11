@@ -13,6 +13,8 @@ Design rules enforced here:
   (audit finding: no more "Urgent priority / Low risk").
 """
 
+from __future__ import annotations
+
 import re
 
 # --------------------------------------------------------------------------

@@ -5,6 +5,8 @@ reduce-motion, visible focus outlines, aria labels on visuals, and
 modular voice widgets (browser speech synthesis / recognition).
 """
 
+from __future__ import annotations
+
 import html
 import json
 
@@ -253,11 +255,13 @@ label[data-baseweb="checkbox"] [aria-checked="true"] {{
 .metric-row .label {{ color: var(--muted); }}
 .metric-row .value {{ font-weight: 600; text-align: right; }}
 
-/* ---- Progress ---- */
-.progress-track {{ display: flex; gap: 4px; margin: 8px 0 6px; }}
-.progress-seg {{ flex: 1; height: 8px; border-radius: 4px; background: var(--border);
-    transition: background .3s ease; }}
-.progress-seg.filled {{ background: var(--accent); }}
+/* ---- Progress (named phases, monotonic) ---- */
+.phase-track {{ display: flex; gap: 5px; margin: 8px 0 6px; }}
+.phase-cell {{ flex: 1; font-size: 11px; font-weight: 650; color: var(--muted);
+    padding: 7px 2px 2px; text-align: center; border-top: 3px solid var(--border);
+    transition: border-color .3s ease, color .3s ease; }}
+.phase-cell.done {{ border-top-color: var(--accent); }}
+.phase-cell.now {{ border-top-color: var(--accent); color: var(--accent-text); }}
 .progress-caption {{ font-size: 12px; color: var(--muted); }}
 
 /* ---- Step card ---- */
@@ -475,32 +479,46 @@ def sensitive_warning(lang: str = "en"):
 """, unsafe_allow_html=True)
 
 
-def progress_bar(current: int, total: int, lang: str = "en"):
-    total = max(total, current, 1)
-    segs = "".join(
-        f'<div class="progress-seg{" filled" if i < current else ""}"></div>'
-        for i in range(total)
+# The four user-facing phases, in order. Engine Turn.phase values map onto these.
+# Replaces the old numeric step counter, which counted internal flow nodes and
+# could open at "Step 3 of 5" or jump backwards when the flow re-planned.
+PHASE_FLOW = [
+    ("describe", ("Describe", "Describir")),
+    ("diagnose", ("Diagnose", "Diagnosticar")),
+    ("fix", ("Try fixes", "Probar soluciones")),
+    ("wrap", ("Wrap up", "Cierre")),
+]
+_PHASE_INDEX = {"intake": 0, "diagnosis": 1, "troubleshooting": 2,
+                "escalation_offer": 3, "identity": 3, "resolved": 3}
+
+
+def phase_progress(phase: str, lang: str = "en", caption: str = ""):
+    """Monotonic four-phase tracker: where the user is, in plain words."""
+    idx = _PHASE_INDEX.get(phase, 0)
+    li = 0 if lang == "en" else 1
+    cells = "".join(
+        f'<div class="phase-cell {"done" if i < idx else ("now" if i == idx else "todo")}">'
+        f'{esc(labels[li])}</div>'
+        for i, (_, labels) in enumerate(PHASE_FLOW)
     )
+    cap = f'<div class="progress-caption">{esc(caption)}</div>' if caption else ""
     st.markdown(f"""
-<div class="progress-track" role="progressbar" aria-valuenow="{current}" aria-valuemin="1"
-     aria-valuemax="{total}" aria-label="{esc(L('step_of', lang, a=current, b=total))}">{segs}</div>
-<div class="progress-caption">{esc(L('step_of', lang, a=current, b=total))}</div>
+<div class="phase-track" role="progressbar" aria-valuenow="{idx + 1}" aria-valuemin="1"
+     aria-valuemax="{len(PHASE_FLOW)}" aria-label="{esc(PHASE_FLOW[idx][1][li])}">{cells}</div>
+{cap}
 """, unsafe_allow_html=True)
 
 
 def session_panel(turn, lang: str = "en"):
-    conf = int(turn.confidence)
-    conf_kind = "ok" if conf >= 70 else ("warn" if conf >= 40 else "danger")
+    # Deliberately no "est. time remaining" or "resolution confidence" here:
+    # those numbers are heuristics, and false precision erodes trust. The
+    # routing-confidence heuristic still appears in the IT Staff view, labeled.
     st.markdown(f"""
 <div class="panel">
   <h4>{esc(L('session_status', lang))}</h4>
   <div style="margin-bottom:8px;">{phase_badge(turn.phase, lang)}</div>
   <div class="metric-row"><span class="label">{esc(L('current_activity', lang))}</span>
       <span class="value">{esc(turn.status_label)}</span></div>
-  <div class="metric-row"><span class="label">{esc(L('time_remaining', lang))}</span>
-      <span class="value">{int(turn.est_minutes_remaining)} min</span></div>
-  <div class="metric-row"><span class="label">{esc(L('confidence', lang))}</span>
-      <span class="value">{badge(f"{conf}%", conf_kind)}</span></div>
 </div>
 """, unsafe_allow_html=True)
     if turn.issue_summary:
@@ -702,6 +720,10 @@ def summary_preview(t: dict, lang: str = "en"):
             else "No se completaron pasos antes de este resumen."
         tried_html = f"<p style='color:var(--muted)'>{esc(none_txt)}</p>"
 
+    reported = (t.get("user_reported") or "").strip()
+    verbatim_html = (f'<div class="sec"><h5>{esc(L("sum_verbatim", lang))}</h5>'
+                     f'<p>&ldquo;{esc(reported)}&rdquo;</p></div>') if reported else ""
+
     st.markdown(f"""
 <div class="ticket" role="article" aria-label="support summary">
   <div class="ticket-head">
@@ -718,6 +740,7 @@ def summary_preview(t: dict, lang: str = "en"):
       <div class="kv"><span class="k">{esc(L('field_campus', lang))}</span>
         <span class="v">{esc(t.get("user_location"))}</span></div>
     </div>
+    {verbatim_html}
     <div class="sec"><h5>{esc(L('sum_issue', lang))}</h5><p>{esc(t.get("executive_summary"))}</p></div>
     <div class="sec"><h5>{esc(L('sum_tried', lang))}</h5>{tried_html}</div>
   </div>

@@ -61,15 +61,24 @@ locks after 5 failed attempts and every attempt is audit-logged.
 
 ## Key features
 
-- **Personalized intake** — name, email, role, campus, room, device, category, and a
-  required data-sensitivity question, with a privacy notice before anything is collected.
+- **Issue-first intake** — the conversation opens with the problem. Contact details
+  (name, email, role, location) are collected only when a technician is actually
+  needed, one question at a time, with anything already known (like the device)
+  never re-asked. Data sensitivity is inferred from the issue category.
 - **Knowledge-base-driven diagnostics** — `knowledge_base.py` organizes troubleshooting
   by product → issue → symptoms. Both engines identify the product, match symptoms to
   the closest entry, ask a targeted follow-up when confidence is low, present only the
   next best step, and adapt to answers. Adding knowledge = appending an entry.
 - **Guided steps** — every step card shows what to do / why it matters / expected result,
   with buttons: It worked · Still not working · I need help with this step, plus an
-  optional "Show me how" visual (accessible SVG + alt text + video placeholder).
+  optional "Show me how" visual (accessible SVG + alt text + video placeholder). Every
+  answer is acknowledged back to the user, and progress is shown as four honest phases
+  (Describe → Diagnose → Try fixes → Wrap up), never a step counter that jumps around.
+- **Device-aware routing** — explicit device evidence ("projector", "chromebook") boosts
+  same-device flows and vetoes flows built for a different device, so a shared phrase
+  like "won't turn on" can never route a projector report to Chromebook steps. The
+  user's verbatim description always travels with the ticket, so even an imperfect
+  match can't erase what was actually reported.
 - **Safety** — privacy notices, sensitive-data warnings, security issues fast-escalate
   to Security Operations with no user self-remediation.
 - **Escalation & smart routing** — stops when steps are exhausted, admin rights are

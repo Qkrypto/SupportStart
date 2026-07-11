@@ -10,6 +10,8 @@ Access control (C4): constant-time comparison, optional SHA-256 stored code
 persistent audit log of sign-in attempts.
 """
 
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json

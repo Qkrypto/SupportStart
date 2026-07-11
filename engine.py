@@ -6,6 +6,8 @@ When no key is present, demo_engine.DemoEngine provides the same Turn
 interface fully offline.
 """
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 

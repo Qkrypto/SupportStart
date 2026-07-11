@@ -9,6 +9,8 @@ email dispatch when configured (C2). Storage survives redeploys when a
 DATABASE_URL is configured (C1).
 """
 
+from __future__ import annotations
+
 import os
 import time
 
@@ -57,6 +59,7 @@ def init_state():
     ss.setdefault("intake", None)
     ss.setdefault("identity_data", {})
     ss.setdefault("identity_mode", False)
+    ss.setdefault("identity_prefilled", set())
     ss.setdefault("pending_reason", "")
     # Attachments / duplicates / dispatch
     ss.setdefault("attachments", [])
@@ -71,8 +74,8 @@ def start_over():
     for k in ["messages", "api_messages", "demo_state", "log", "last_turn", "ticket",
               "submitted", "feedback_done", "session_id", "pending_input",
               "force_escalate", "intake", "identity_data", "identity_mode",
-              "pending_reason", "attachments", "dup_matches", "dispatch_note",
-              "last_input_ts", "category_recorded"]:
+              "identity_prefilled", "pending_reason", "attachments", "dup_matches",
+              "dispatch_note", "last_input_ts", "category_recorded"]:
         st.session_state.pop(k, None)
     init_state()
 
@@ -236,6 +239,8 @@ def begin_escalation(reason: str):
     mem = ss.demo_state.get("memory") if ss.demo_state else None
     if mem and mem.get("device_type"):
         ss.identity_data.setdefault("device", mem["device_type"])
+    # Anything already known doesn't count toward the contact-details progress.
+    ss.identity_prefilled = set(ss.identity_data.keys())
     if ss.intake is None:
         ss.identity_mode = True
         say(intake_flow.prompt(intake_flow.next_step(ss.identity_data), LANG, ss.identity_data))
@@ -257,6 +262,10 @@ def build_ticket(reason: str):
         except Exception as e:
             st.error(f"{L('error_generic', LANG)} ({type(e).__name__})")
             return
+    # The user's first message always travels with the ticket, whichever engine
+    # built it, so a routing mistake can never erase what was actually reported.
+    first_user = next((m["content"] for m in transcript if m["role"] == "user"), "")
+    ss.ticket.setdefault("user_reported", first_user)
     t = ss.ticket
     if not any(e["kind"] == "escalation_reason" for e in ss.log):
         ss.log.append({"kind": "escalation_reason", "detail": reason})
@@ -322,7 +331,12 @@ with st.sidebar:
     if mode == "support" and st.session_state.last_turn and user_message_count() > 0:
         st.divider()
         ui.session_panel(st.session_state.last_turn, LANG)
-        ui.timeline_panel(st.session_state.log, LANG)
+        # Users see what THEY said and did. Internal findings (KB match ids,
+        # inferred device, confidence, escalation rationale) belong to the IT
+        # Staff view, which renders the unfiltered log.
+        user_log = [e for e in st.session_state.log
+                    if e["kind"] in ("info_collected", "step_attempted", "step_result")]
+        ui.timeline_panel(user_log, LANG)
 
     st.divider()
     if mode == "support" and st.session_state.ticket is None and user_message_count() > 0:
@@ -395,10 +409,11 @@ with col_side:
     if entry and set(entry["categories"]) & intake_flow.SENSITIVE_CATEGORIES:
         ui.sensitive_warning(LANG)
     if ss.identity_mode:
-        cur, total = intake_flow.progress(ss.identity_data)
-        ui.progress_bar(cur, total, LANG)
+        cur, total = intake_flow.progress(ss.identity_data, ss.identity_prefilled)
+        ui.phase_progress("identity", LANG,
+                          caption=L("contact_details_of", LANG, a=cur, b=total))
     elif turn and ss.ticket is None and user_message_count() > 0:
-        ui.progress_bar(turn.progress_current, turn.progress_total, LANG)
+        ui.phase_progress(turn.phase, LANG)
     st.markdown(f"""
 <div class="panel">
   <h4>{L('ticket_panel', LANG)}</h4>
@@ -458,6 +473,20 @@ with col_chat:
         with st.expander(f":material/description: {L('sum_copyready', LANG)}", expanded=copy_clicked):
             st.caption(L("copy_hint", LANG))
             st.code(summary_text, language=None)
+
+        # Explicit finish line: exactly what to do with the summary, in order.
+        email = (ss.intake or {}).get("email") or ("your email" if LANG == "en" else "su correo")
+        st.markdown(f"""
+<div class="panel">
+  <h4>{ui.esc(L('next_steps_title', LANG))}</h4>
+  <ol style="margin:4px 0 8px; padding-left:20px; font-size:13.5px; line-height:1.6;">
+    <li>{ui.esc(L('next_steps_1', LANG))}</li>
+    <li>{ui.esc(L('next_steps_2', LANG))}</li>
+    <li>{ui.esc(L('next_steps_3', LANG, email=email))}</li>
+  </ol>
+  <div style="font-size:12px; color:var(--muted);">{ui.esc(L('next_steps_demo', LANG))}</div>
+</div>
+""", unsafe_allow_html=True)
 
         if edit_mode:
             with st.form("edit_ticket"):

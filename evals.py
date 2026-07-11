@@ -104,6 +104,26 @@ SCENARIOS = [
     {"name": "Password sign-in issue routes to lockout flow",
      "messages": ["I can't sign in, my password is incorrect", "Computer sign-in"],
      "expect": {"entry": "login_lockout", "served_step": True}},
+    # Landing-page example phrases: these are the first things a visitor tries,
+    # so each must route to the right flow (regression: projector matched the
+    # Chromebook flow via the shared phrase "won't turn on").
+    {"name": "Projector won't turn on routes to AV flow (not Chromebook)",
+     "messages": ["The projector in my classroom won't turn on", "Picture"],
+     "expect": {"entry": "projector_av", "device": "Smartboard / display",
+                "served_step": True}},
+    {"name": "Screen won't turn on routes to screen flow",
+     "messages": ["my screen won't turn on", "Completely black"],
+     "expect": {"entry": "screen_display", "served_step": True}},
+    {"name": "Printer jam routes to printer flow",
+     "messages": ["printer jammed", "Shared copier"],
+     "expect": {"entry": "printer_not_printing", "device": "Printer / copier",
+                "served_step": True}},
+    {"name": "Chromebook won't turn on still routes to Chromebook flow",
+     "messages": ["my chromebook won't turn on"],
+     "expect": {"entry": "chromebook_frozen", "device": "Chromebook"}},
+    {"name": "Smartboard won't turn on routes to smartboard flow",
+     "messages": ["my smartboard won't turn on"],
+     "expect": {"entry": "smartboard_display_touch", "device": "Smartboard / display"}},
 ]
 
 

@@ -10,6 +10,8 @@ All queries are parameterized. Queries are written with '?' placeholders and
 translated to '%s' for Postgres.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sqlite3

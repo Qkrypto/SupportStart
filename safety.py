@@ -4,6 +4,8 @@ and sensitive-data (PII) detection.
 Both engines and the app use these so behavior is consistent. The user-facing
 wording lives in strings.py (boundary_reply, pii_warning)."""
 
+from __future__ import annotations
+
 import re
 
 # ---------------------------------------------------------------------------

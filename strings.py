@@ -4,6 +4,8 @@ Usage:  from strings import L; L("submit_ticket", lang)
 Content dicts elsewhere use {"en": ..., "es": ...}; tr() picks the language.
 """
 
+from __future__ import annotations
+
 STRINGS = {
     # --- App chrome ---
     "tagline": {
@@ -139,6 +141,8 @@ STRINGS = {
     "issue_summary": {"en": "Issue summary", "es": "Resumen del problema"},
     "timeline": {"en": "Troubleshooting timeline", "es": "Cronología de la solución"},
     "step_of": {"en": "Step {a} of {b}", "es": "Paso {a} de {b}"},
+    "contact_details_of": {"en": "Contact details · question {a} of {b}",
+                           "es": "Datos de contacto · pregunta {a} de {b}"},
     "what_to_do": {"en": "What to do", "es": "Qué hacer"},
     "why_matters": {"en": "Why this matters", "es": "Por qué es importante"},
     "expected_result": {"en": "Expected result", "es": "Resultado esperado"},
@@ -184,6 +188,7 @@ STRINGS = {
               "ahorrar tiempo y ayudar a resolver el problema más rápido.",
     },
     "sum_requester": {"en": "Requester", "es": "Solicitante"},
+    "sum_verbatim": {"en": "In your words", "es": "En sus palabras"},
     "sum_issue": {"en": "What's happening", "es": "Qué está pasando"},
     "sum_tried": {"en": "Troubleshooting already tried", "es": "Pasos ya intentados"},
     "sum_copyready": {"en": "Copy-ready ticket text", "es": "Texto listo para copiar al ticket"},
@@ -193,6 +198,23 @@ STRINGS = {
     "cancel": {"en": "Cancel", "es": "Cancelar"},
     "preparing_ticket": {"en": "Preparing your support summary…", "es": "Preparando su resumen de soporte…"},
     "ticket_panel": {"en": "Support summary", "es": "Resumen de soporte"},
+    "next_steps_title": {"en": "What happens next", "es": "Qué sigue"},
+    "next_steps_1": {
+        "en": "Copy the summary above (or download the .txt file).",
+        "es": "Copie el resumen de arriba (o descargue el archivo .txt).",
+    },
+    "next_steps_2": {
+        "en": "Open your school's help desk portal — or email IT support — and paste it into a new ticket.",
+        "es": "Abra el portal de soporte de su escuela — o escriba al correo de TI — y péguelo en un ticket nuevo.",
+    },
+    "next_steps_3": {
+        "en": "IT will reply to {email}. You don't need to explain anything again — the summary covers it.",
+        "es": "TI le responderá a {email}. No tendrá que explicar nada de nuevo — el resumen lo cubre todo.",
+    },
+    "next_steps_demo": {
+        "en": "Reminder: this demo doesn't submit anything on your behalf.",
+        "es": "Recordatorio: esta demostración no envía nada en su nombre.",
+    },
     "no_ticket_yet": {
         "en": "A support summary will appear here if a technician is needed.",
         "es": "Aquí aparecerá un resumen de soporte si se necesita un técnico.",

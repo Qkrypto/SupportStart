@@ -11,6 +11,8 @@ Pure logic (no Streamlit) so it is unit-testable. app.py drives it via
 next_step(), prompt(), quick_replies(), process(), progress(), finalize().
 """
 
+from __future__ import annotations
+
 import re
 
 import config
@@ -86,10 +88,17 @@ def next_step(data: dict) -> str | None:
     return None
 
 
-def progress(data: dict) -> tuple[int, int]:
-    total = len(STEPS)
+def progress(data: dict, prefilled: set | frozenset = frozenset()) -> tuple[int, int]:
+    """Position among the questions the user will actually be asked.
+
+    Steps satisfied before intake began (e.g. the device inferred during
+    troubleshooting) are excluded, so the counter starts at 1 and the total
+    matches what the user experiences.
+    """
+    asked = [s for s in STEPS if s not in prefilled]
+    total = max(len(asked), 1)
     done = 0
-    for step in STEPS:
+    for step in asked:
         if step == "location":
             done += 1 if "location_done" in data else 0
         else:

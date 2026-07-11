@@ -14,6 +14,8 @@ Both engines consume this KB:
 Adding knowledge = appending an entry. No engine code changes required.
 """
 
+from __future__ import annotations
+
 import re
 
 
@@ -123,10 +125,14 @@ ENTRIES = [
         "id": "chromebook_frozen",
         "product": "Chromebook",
         "categories": ["chromebook", "device_checkout"],
-        "symptoms": ["chromebook", "frozen", "won't turn on", "wont turn on", "chrome os",
+        # Deliberately no bare "won't turn on" / "no enciende" here: those phrases
+        # describe projectors, screens, and printers too, and must never route a
+        # non-Chromebook report to this flow (audit finding: projector -> Chromebook).
+        "symptoms": ["chromebook", "frozen", "chrome os",
                      "chromebook broken", "chromebook not working", "chromebook won't work",
                      "chromebook wont work", "chromebook is broken", "chromebook won't turn on",
-                     "congelado", "no enciende", "chromebook no funciona"],
+                     "chromebook wont turn on", "chromebook won't start",
+                     "congelado", "chromebook no enciende", "chromebook no funciona"],
         "issue": B("Chromebook not working correctly", "El Chromebook no funciona correctamente"),
         "questions": [
             {"q": B("What is the Chromebook doing?", "¿Qué está haciendo el Chromebook?"),
@@ -146,6 +152,14 @@ ENTRIES = [
              "difficulty": "Easy", "visual": "chromebook_keys",
              "help": B("The Refresh key looks like a circle made of an arrow, in the top row, usually the 4th key from the left.",
                        "La tecla Actualizar parece un círculo hecho de una flecha, en la fila superior, normalmente la cuarta tecla desde la izquierda.")},
+            {"title": B("Charge it for 10 minutes, then try again", "Cárguelo 10 minutos y vuelva a intentar"),
+             "what": B("Plug the Chromebook into its charger, confirm the small charging light next to the port comes on, wait about 10 minutes, then press the Power button.",
+                       "Conecte el Chromebook a su cargador, confirme que la lucecita de carga junto al puerto se enciende, espere unos 10 minutos y presione el botón de encendido."),
+             "why": B("A fully drained battery looks exactly like a dead Chromebook; a short charge rules that out.",
+                      "Una batería totalmente descargada se ve igual que un Chromebook dañado; una carga corta lo descarta."),
+             "expected": B("The charging light turns on and the Chromebook starts after charging.",
+                           "La luz de carga se enciende y el Chromebook arranca después de cargar."),
+             "difficulty": "Easy"},
         ],
         "esc_reason": B("Hard reset did not restore normal operation; device-level service or reimage may be required.",
                         "El reinicio forzado no restauró el funcionamiento normal; puede requerirse servicio del equipo."),
@@ -248,6 +262,14 @@ ENTRIES = [
                       "Los proyectores suelen perder sincronía con la entrada; apagar/encender y reelegir la fuente lo restaura."),
              "expected": B("Picture and sound return.", "La imagen y el sonido regresan."),
              "difficulty": "Easy", "visual": "hdmi_source"},
+            {"title": B("Check power and the video cable at both ends", "Revise la corriente y el cable de video en ambos extremos"),
+             "what": B("Confirm the projector's power light is on (check the wall outlet or power strip if it isn't), then unplug and firmly reconnect the HDMI/VGA cable at the projector and at your computer.",
+                       "Confirme que la luz de encendido del proyector está prendida (revise el enchufe o la regleta si no lo está), luego desconecte y vuelva a conectar firmemente el cable HDMI/VGA en el proyector y en su computadora."),
+             "why": B("A switched-off outlet or a loose cable is the most common reason a projector shows nothing at all.",
+                      "Un enchufe apagado o un cable suelto es la razón más común de que un proyector no muestre nada."),
+             "expected": B("The power light comes on and the projector shows your screen.",
+                           "La luz de encendido se prende y el proyector muestra su pantalla."),
+             "difficulty": "Easy"},
         ],
         "esc_reason": B("AV equipment fault persists after power cycle and input checks.",
                         "La falla del equipo audiovisual persiste tras reiniciar y revisar entradas."),
@@ -1291,6 +1313,19 @@ def kw_in(text: str, kw: str) -> bool:
     return re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", text) is not None
 
 
+# Explicit device evidence -> the KB categories that concern that device.
+# Used to boost same-device flows and to veto flows built for a DIFFERENT
+# specific device (audit finding: "projector won't turn on" must never match
+# the Chromebook flow just because both share a generic symptom phrase).
+DEVICE_CATEGORIES = {
+    "Chromebook": {"chromebook"},
+    "Windows laptop/desktop": {"windows"},
+    "Smartboard / display": {"smartboard", "projector_av"},
+    "Printer / copier": {"printer"},
+}
+_DEVICE_SPECIFIC_CATS = set().union(*DEVICE_CATEGORIES.values())
+
+
 def _score(entry: dict, text: str, category: str | None, device: str | None) -> float:
     score = 0.0
     for kw in entry["symptoms"]:
@@ -1298,9 +1333,17 @@ def _score(entry: dict, text: str, category: str | None, device: str | None) -> 
             score += 3.0 + 1.5 * (len(kw.split()) - 1)  # specific multi-word phrases weigh more
     if category and category != "other" and category in entry["categories"]:
         score += 4.0
-    if device and device.split()[0].lower() in entry["product"].lower():
-        score += 1.0  # device is a weak hint; a specific symptom should always win
-    return score
+    if device:
+        cats = set(entry["categories"])
+        compat = DEVICE_CATEGORIES.get(device)
+        if compat and cats & compat:
+            score += 3.0  # flow is about the device the user explicitly named
+        elif (compat and cats & _DEVICE_SPECIFIC_CATS
+              and "other" not in cats and not (cats & compat)):
+            score -= 4.0  # flow is specific to a DIFFERENT device: near-veto
+        elif device.split()[0].lower() in entry["product"].lower():
+            score += 1.0  # weak product-name hint (e.g. Mac); symptoms still dominate
+    return max(score, 0.0)
 
 
 def match_entries(text: str, category: str | None = None, device: str | None = None,

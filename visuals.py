@@ -7,6 +7,8 @@ so the chat stays clean. New visuals/videos can be added here without
 touching engine or UI code.
 """
 
+from __future__ import annotations
+
 _SVG_STYLE = 'font-family:sans-serif;'
 
 

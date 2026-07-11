@@ -16,6 +16,8 @@ If unconfigured, the app degrades gracefully: tickets are still stored and
 downloadable, and the UI says dispatch is not configured.
 """
 
+from __future__ import annotations
+
 import os
 import smtplib
 from email.message import EmailMessage
