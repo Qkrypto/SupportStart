@@ -20,22 +20,22 @@ from visuals import get_visual
 # ---------------------------------------------------------------------------
 THEMES = {
     "light": {
-        "bg": "#f4f6fa", "surface": "#ffffff", "surface2": "#f8fafd",
-        "border": "#d5dce8", "text": "#16202e", "muted": "#4c5c74",
-        "accent": "#1a46c2", "accent-soft": "#e8effd", "accent-text": "#1a46c2",
+        "bg": "#f7f7fb", "surface": "#ffffff", "surface2": "#f4f3fb",
+        "border": "#e5e3f0", "text": "#1a1730", "muted": "#5b5776",
+        "accent": "#5b4ae0", "accent-soft": "#ecebfd", "accent-text": "#4a3cc4",
         "ok": "#0b6157", "ok-soft": "#e6f5f3",
         "warn": "#8a4207", "warn-soft": "#fdf1e3",
         "danger": "#a11616", "danger-soft": "#fdeaea",
-        "shadow": "0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04)",
+        "shadow": "0 1px 2px rgba(24,20,50,.05)",
     },
     "dark": {
-        "bg": "#0e1420", "surface": "#161e2e", "surface2": "#1c2638",
-        "border": "#324260", "text": "#e9edf5", "muted": "#a3b2c8",
-        "accent": "#6d9af5", "accent-soft": "#1d2c4a", "accent-text": "#a5c2fa",
+        "bg": "#0c0d14", "surface": "#14151f", "surface2": "#1a1c28",
+        "border": "#282a3a", "text": "#e9eaf2", "muted": "#9a9cb0",
+        "accent": "#8b7bf7", "accent-soft": "#221f3a", "accent-text": "#b6acfb",
         "ok": "#45d6a4", "ok-soft": "#12302a",
         "warn": "#fcc43c", "warn-soft": "#33290f",
         "danger": "#f98888", "danger-soft": "#3a1a1a",
-        "shadow": "0 1px 3px rgba(0,0,0,.4)",
+        "shadow": "0 1px 2px rgba(0,0,0,.35)",
     },
     # High-contrast variants (approach WCAG AAA)
     "light_hc": {
@@ -103,7 +103,28 @@ span[class*="material-symbols"], .material-symbols-rounded, .material-icons {{
 /* Keyboard navigation: always-visible focus */
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible,
 [role="button"]:focus-visible {{
-    outline: 3px solid var(--accent) !important; outline-offset: 2px !important;
+    outline: 2px solid var(--accent) !important; outline-offset: 2px !important;
+}}
+
+/* Force the violet accent onto Streamlit's radios / toggles / checkboxes / slider
+   (otherwise they render in Streamlit's default red when the theme config is absent). */
+input {{ accent-color: var(--accent); }}
+[data-testid="stRadio"] [role="radiogroup"] label div[data-checked="true"],
+[data-baseweb="radio"] div[aria-checked="true"] {{
+    background-color: var(--accent) !important; border-color: var(--accent) !important;
+}}
+[data-testid="stCheckbox"] [data-checked="true"],
+[role="checkbox"][aria-checked="true"] {{
+    background-color: var(--accent) !important; border-color: var(--accent) !important;
+}}
+/* Toggle: on-state track + knob */
+[data-testid="stToggle"] [aria-checked="true"],
+[data-baseweb="checkbox"] [role="switch"][aria-checked="true"] > div:first-child,
+label[data-baseweb="checkbox"] [aria-checked="true"] {{
+    background-color: var(--accent) !important;
+}}
+[data-baseweb="slider"] [role="slider"], [data-testid="stSlider"] [role="slider"] {{
+    background-color: var(--accent) !important;
 }}
 
 /* ---- Chat ---- */
@@ -301,6 +322,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
     letter-spacing: .8px; color: var(--muted); display:block; margin-bottom: 3px; }}
 .ticket .kv .v {{ font-size: 13.5px; font-weight: 550; }}
 
+/* Ring-of-light logo: gentle violet glow pulse */
+@keyframes ssGlow {{
+  0%, 100% {{ filter: drop-shadow(0 0 1px var(--accent)); }}
+  50% {{ filter: drop-shadow(0 0 6px var(--accent)); }}
+}}
+.ss-logo {{ animation: ssGlow 3.2s ease-in-out infinite; }}
+@keyframes ssSpin {{ to {{ transform: rotate(360deg); }} }}
+.ss-spin {{ transform-origin: 50% 50%; animation: ssSpin 1.5s linear infinite;
+    filter: drop-shadow(0 0 3px var(--accent)); }}
+@media (prefers-reduced-motion: reduce) {{ .ss-logo, .ss-spin {{ animation: none; }} }}
+
 .quick-label {{ font-size: 12px; color: var(--muted); margin: 2px 0 6px; }}
 .visual-caption {{ font-size: 12.5px; color: var(--muted); margin-top: 6px; }}
 hr {{ border-color: var(--border); }}
@@ -358,35 +390,48 @@ def esc(s) -> str:
     return html.escape(str(s or ""))
 
 
+def logo_mark(size: int = 40, glow: bool = True) -> str:
+    """Flat quad ring-of-light mark with a bold S. Theme-aware, crisp at any size.
+    The ring segments gently pulse a violet glow (respects reduced-motion)."""
+    cls = "ss-logo" if glow else ""
+    return (
+        f'<svg class="{cls}" width="{size}" height="{size}" viewBox="0 0 200 200" aria-hidden="true" style="flex-shrink:0;overflow:visible;">'
+        '<circle cx="100" cy="100" r="60" fill="none" stroke="var(--border)" stroke-width="9" opacity=".5"/>'
+        '<circle class="ss-ring" cx="100" cy="100" r="60" fill="none" stroke="var(--accent)" stroke-width="9" '
+        'stroke-dasharray="79.25 15" stroke-dashoffset="86.75"/>'
+        '<text x="100" y="128" text-anchor="middle" '
+        'font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" '
+        'font-size="76" font-weight="800" fill="var(--text)">S</text>'
+        '</svg>'
+    )
+
+
+LOGO_MARK = logo_mark(40)
+
+
 def header(lang: str = "en"):
     badge_html = ""
     if getattr(config, "APP_BADGE", ""):
         badge_html = f'<span class="badge badge-accent" style="margin-left:8px;vertical-align:middle;">{esc(config.APP_BADGE)}</span>'
     st.markdown(f"""
 <div class="app-header" role="banner">
-  <div class="logo" aria-hidden="true">{esc(config.ORG_SHORT)}</div>
+  {LOGO_MARK}
   <div>
     <h1 style="display:inline-block;">{esc(config.APP_NAME)}</h1>{badge_html}
-    <p>{esc(config.ORG_NAME)} · {esc(L('tagline', lang))}</p>
+    <p>{esc(L('tagline', lang))}</p>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 
 def welcome_hero(lang: str = "en"):
-    chips = [
-        ("🧭", L("chip_guided", lang)),
-        ("💬", L("chip_noforms", lang)),
-        ("🎫", L("chip_ticket", lang)),
-        ("🌐", L("chip_bilingual", lang)),
-    ]
-    chip_html = "".join(
-        f'<span class="chip"><span class="ic">{ic}</span>{esc(txt)}</span>' for ic, txt in chips
-    )
+    chips = [L("chip_guided", lang), L("chip_noforms", lang),
+             L("chip_ticket", lang), L("chip_bilingual", lang)]
+    chip_html = "".join(f'<span class="chip">{esc(txt)}</span>' for txt in chips)
     eyebrow = "Welcome" if lang == "en" else "Bienvenido"
     st.markdown(f"""
 <div class="hero">
-  <span class="eyebrow">👋 {esc(eyebrow)}</span>
+  <span class="eyebrow">{esc(eyebrow)}</span>
   <h2>{esc(L('welcome_title', lang))}</h2>
   <p>{esc(L('welcome_sub', lang))}</p>
   <div class="chips">{chip_html}</div>
@@ -407,7 +452,7 @@ def phase_badge(phase: str, lang: str = "en") -> str:
 def prototype_notice(lang: str = "en"):
     st.markdown(f"""
 <div class="panel notice" role="note" aria-label="prototype notice">
-  <h4>🧪 {esc(L('prototype_title', lang))}</h4>
+  <h4>{esc(L('prototype_title', lang))}</h4>
   <div style="font-size:13px; line-height:1.6;">{esc(L('prototype_notice', lang))}</div>
 </div>
 """, unsafe_allow_html=True)
@@ -417,7 +462,7 @@ def privacy_notice(lang: str = "en"):
     st.markdown(f"""
 <div class="panel notice" role="note" aria-label="privacy notice">
   <h4>{esc(L('privacy_title', lang))}</h4>
-  <div style="font-size:13.5px; line-height:1.6;">⚠️ {esc(L('privacy_notice', lang))}</div>
+  <div style="font-size:13.5px; line-height:1.6;">{esc(L('privacy_notice', lang))}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -425,7 +470,7 @@ def privacy_notice(lang: str = "en"):
 def sensitive_warning(lang: str = "en"):
     st.markdown(f"""
 <div class="panel notice" role="alert">
-  <div style="font-size:13.5px; line-height:1.6;">🔒 {esc(L('sensitive_warning', lang))}</div>
+  <div style="font-size:13.5px; line-height:1.6;">{esc(L('sensitive_warning', lang))}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -514,18 +559,23 @@ def step_card(step: dict, lang: str = "en"):
     if visual_id:
         v = get_visual(visual_id)
         if v:
-            with st.expander(f"🖼️ {L('show_me_how', lang)}, {tr(v['caption'], lang)}"):
+            with st.expander(f":material/image: {L('show_me_how', lang)} · {tr(v['caption'], lang)}"):
                 st.markdown(v["svg"], unsafe_allow_html=True)
                 st.markdown(f'<div class="visual-caption">{esc(tr(v["alt"], lang))}</div>',
                             unsafe_allow_html=True)
-                st.caption(f"▶️ {L('play_video', lang)}: {L('video_placeholder', lang)}")
+                st.caption(f"{L('play_video', lang)}: {L('video_placeholder', lang)}")
 
 
 def thinking(placeholder, lang: str = "en"):
+    ring = (
+        '<svg class="ss-spin" width="20" height="20" viewBox="0 0 200 200" aria-hidden="true" style="overflow:visible;">'
+        '<circle cx="100" cy="100" r="72" fill="none" stroke="var(--accent)" stroke-width="16" '
+        'stroke-linecap="round" stroke-dasharray="79.25 15" stroke-dashoffset="86.75"/>'
+        '</svg>'
+    )
     placeholder.markdown(f"""
 <div class="thinking" role="status" aria-live="polite">
-  <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
-  {esc(L('thinking', lang))}…
+  {ring}{esc(L('thinking', lang))}…
 </div>
 """, unsafe_allow_html=True)
 
@@ -550,12 +600,14 @@ def tts_button(text: str, lang: str = "en", key: str = ""):
     """
     payload = json.dumps(_speakable(text))
     voice = "es-ES" if lang == "es" else "en-US"
-    stop_label = "⏹" if lang == "en" else "⏹"
+    listen = esc(L('listen', lang))
+    stop_label = "Stop" if lang == "en" else "Detener"
     components.html(f"""
-<button id="tts" aria-label="{esc(L('listen', lang))}" title="{esc(L('listen', lang))}"
-  style="border:1.5px solid #94a3b8;background:transparent;border-radius:8px;
-         padding:4px 12px;cursor:pointer;font-size:13px;color:#64748b;">
-  🔊 {esc(L('listen', lang))}</button>
+<button id="tts" aria-label="{listen}" title="{listen}"
+  style="border:0.5px solid #444; background:transparent; border-radius:8px;
+         padding:5px 12px; cursor:pointer; font-size:13px; color:#9a9cb0;
+         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  {listen}</button>
 <script>
   const FULL = {payload};
   const btn = document.getElementById('tts');
@@ -566,14 +618,14 @@ def tts_button(text: str, lang: str = "en", key: str = ""):
     playing = false;
     if (keepAlive) clearInterval(keepAlive);
     synth.cancel();
-    btn.innerHTML = '🔊 {esc(L('listen', lang))}';
+    btn.innerHTML = '{listen}';
   }}
 
   btn.onclick = () => {{
     if (playing) {{ stop(); return; }}
     stop();
     playing = true;
-    btn.innerHTML = '{stop_label} …';
+    btn.innerHTML = '{stop_label}';
     // Split into sentence-sized chunks; long chunks split on commas.
     let chunks = FULL.match(/[^.!?]+[.!?]+|\\S[^.!?]*$/g) || [FULL];
     chunks = chunks.flatMap(c => c.length > 200 ? c.split(/,(?=\\s)/) : [c])
@@ -600,18 +652,19 @@ def mic_widget(lang: str = "en"):
     Streamlit injection path exists."""
     voice = "es-ES" if lang == "es" else "en-US"
     components.html(f"""
-<div style="font-family:sans-serif;display:flex;gap:8px;align-items:center;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;gap:8px;align-items:center;">
   <button id="mic" aria-label="microphone"
-    style="border:1.5px solid #94a3b8;background:transparent;border-radius:8px;
-           padding:6px 14px;cursor:pointer;font-size:14px;color:#64748b;">🎤</button>
+    style="border:0.5px solid #444;background:transparent;border-radius:8px;
+           padding:6px 14px;cursor:pointer;font-size:13px;color:#9a9cb0;">{esc(L('a11y_voice_input', lang))}</button>
   <input id="out" readonly aria-label="voice transcript" placeholder="{esc(L('mic_hint', lang))}"
-    style="flex:1;border:1.5px solid #94a3b8;border-radius:8px;padding:6px 10px;
-           font-size:13px;color:#334155;background:transparent;"
+    style="flex:1;border:0.5px solid #444;border-radius:8px;padding:6px 10px;
+           font-size:13px;color:#c7c9d6;background:transparent;"
     onclick="this.select()">
 </div>
 <script>
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const btn = document.getElementById('mic'), out = document.getElementById('out');
+  const IDLE = {json.dumps(L('a11y_voice_input', lang))}, REC = {json.dumps('Recording' if lang=='en' else 'Grabando')};
   if (!SR) {{
     out.placeholder = {json.dumps(L('mic_unsupported', lang))};
     btn.disabled = true;
@@ -620,12 +673,12 @@ def mic_widget(lang: str = "en"):
     let listening = false;
     btn.onclick = () => {{
       if (listening) {{ rec.stop(); return; }}
-      listening = true; btn.textContent = '⏺'; rec.start();
+      listening = true; btn.textContent = REC; rec.start();
     }};
     rec.onresult = (e) => {{ out.value = e.results[0][0].transcript; out.select();
                              document.execCommand && document.execCommand('copy'); }};
-    rec.onend = () => {{ listening = false; btn.textContent = '🎤'; }};
-    rec.onerror = () => {{ listening = false; btn.textContent = '🎤'; }};
+    rec.onend = () => {{ listening = false; btn.textContent = IDLE; }};
+    rec.onerror = () => {{ listening = false; btn.textContent = IDLE; }};
   }}
 </script>
 """, height=56)
@@ -675,7 +728,15 @@ def summary_preview(t: dict, lang: str = "en"):
 def staff_ops_view(t: dict, log: list, entry_id: str | None, lang: str = "en"):
     """Technician-only triage detail, shown inside an expander in IT Staff Operations."""
     kb_line = f"<div class='kv'><span class='k'>Matched KB entry</span><span class='v'>{esc(entry_id or 'none')}</span></div>"
-    conf = int(t.get("confidence_score", 0))
+    rc = t.get("routing_confidence")
+    conf_row = (f'<div class="kv"><span class="k">Rule-based routing confidence</span>'
+                f'<span class="v">{int(rc)}%</span></div>') if rc is not None else ""
+    needs = t.get("technician_needs") or []
+    needs_html = ("<ul>" + "".join(f"<li>{esc(x)}</li>" for x in needs) + "</ul>") if needs else "<p>None outstanding.</p>"
+    conf_note = ('<div class="panel"><h4>About routing confidence</h4>'
+                 '<div style="font-size:12px;line-height:1.5;color:var(--muted)">Heuristic knowledge-base '
+                 'match strength (deterministic). Not model certainty, ticket accuracy, or production '
+                 'performance.</div></div>') if rc is not None else ""
     st.markdown(f"""
 <div class="panel">
   <h4>Routing &amp; triage</h4>
@@ -684,17 +745,20 @@ def staff_ops_view(t: dict, log: list, entry_id: str | None, lang: str = "en"):
     <div class="kv"><span class="k">Category</span><span class="v">{esc(t.get("category"))} › {esc(t.get("subcategory"))}</span></div>
     <div class="kv"><span class="k">Priority</span><span class="v">{esc(t.get("priority"))}</span></div>
     <div class="kv"><span class="k">Risk</span><span class="v">{esc(t.get("risk_level"))}</span></div>
-    <div class="kv"><span class="k">Confidence</span><span class="v">{conf}%</span></div>
+    {conf_row}
     <div class="kv"><span class="k">Est. effort</span><span class="v">{esc(t.get("estimated_technician_effort"))}</span></div>
     {kb_line}
   </div>
 </div>
 <div class="panel"><h4>Why this assignment group</h4>
   <div style="font-size:13px;line-height:1.55;">{esc(t.get("assignment_rationale"))}</div></div>
-<div class="panel"><h4>Why this priority</h4>
+<div class="panel"><h4>Why this priority / risk</h4>
   <div style="font-size:13px;line-height:1.55;">{esc(t.get("priority_rationale"))}</div></div>
-<div class="panel"><h4>Suggested resolution path</h4>
+<div class="panel"><h4>Recommended technician resolution path (not yet attempted)</h4>
   <div style="font-size:13px;line-height:1.55;">{esc(t.get("suggested_resolution_path"))}</div></div>
+<div class="panel"><h4>Technician still needs to confirm</h4>
+  <div style="font-size:13px;line-height:1.55;">{needs_html}</div></div>
+{conf_note}
 """, unsafe_allow_html=True)
     timeline_panel(log, lang)
 
@@ -711,8 +775,15 @@ def ticket_preview(t: dict, lang: str = "en"):
         for s in t.get("troubleshooting_performed", [])
     )
     steps_html = f"<ol>{steps}</ol>" if steps else "<p>None</p>"
-    conf = int(t.get("confidence_score", 0))
-    conf_kind = "ok" if conf >= 70 else ("warn" if conf >= 40 else "danger")
+    rc = t.get("routing_confidence")
+    conf_badge = badge(f"Routing match {int(rc)}%", "accent") if rc is not None else ""
+    needs = t.get("technician_needs") or []
+    needs_html = ("<ul>" + "".join(f"<li>{esc(x)}</li>" for x in needs) + "</ul>") if needs \
+        else "<p>None outstanding.</p>"
+    os_line = (f'<div class="kv"><span class="k">Operating system</span>'
+               f'<span class="v">{esc(t.get("operating_system"))}</span></div>') if t.get("operating_system") else ""
+    scope_line = (f'<div class="kv"><span class="k">Affected scope</span>'
+                  f'<span class="v">{esc(t.get("affected_scope"))}</span></div>') if t.get("affected_scope") else ""
     pr = t.get("priority", "Medium")
     pr_kind = {"Urgent": "danger", "High": "warn"}.get(pr, "accent")
 
@@ -726,7 +797,7 @@ def ticket_preview(t: dict, lang: str = "en"):
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       {badge(pr, pr_kind)}
       {badge(f"Risk: {t.get('risk_level', 'Low')}", "accent")}
-      {badge(f"Confidence {conf}%", conf_kind)}
+      {conf_badge}
     </div>
   </div>
   <div class="ticket-body">
@@ -741,19 +812,22 @@ def ticket_preview(t: dict, lang: str = "en"):
     <div class="sec grid">
       <div class="kv"><span class="k">Environment</span><span class="v">{esc(t.get("environment"))}</span></div>
       <div class="kv"><span class="k">Device</span><span class="v">{esc(t.get("device_information"))}</span></div>
+      {os_line}
+      {scope_line}
     </div>
     <div class="sec"><h5>Applications involved</h5>{ul(t.get("applications_involved"))}</div>
     <div class="sec"><h5>Error messages</h5>{ul(t.get("error_messages"))}</div>
     <div class="sec"><h5>Impact</h5><p>{esc(t.get("impact", t.get("business_impact")))}</p></div>
-    <div class="sec"><h5>Troubleshooting completed</h5>{steps_html}</div>
+    <div class="sec"><h5>Troubleshooting completed (self-service)</h5>{steps_html}</div>
+    <div class="sec"><h5>Technician still needs to confirm</h5>{needs_html}</div>
     <div class="sec grid">
       <div class="kv"><span class="k">Assignment group</span><span class="v">{esc(t.get("assignment_group"))}</span></div>
       <div class="kv"><span class="k">Category</span><span class="v">{esc(t.get("category"))} › {esc(t.get("subcategory"))}</span></div>
       <div class="kv"><span class="k">Est. effort</span><span class="v">{esc(t.get("estimated_technician_effort"))}</span></div>
     </div>
     <div class="sec"><h5>Why this assignment group</h5><p>{esc(t.get("assignment_rationale"))}</p></div>
-    <div class="sec"><h5>Why this priority</h5><p>{esc(t.get("priority_rationale"))}</p></div>
-    <div class="sec"><h5>Suggested resolution path</h5><p>{esc(t.get("suggested_resolution_path"))}</p></div>
+    <div class="sec"><h5>Why this priority / risk</h5><p>{esc(t.get("priority_rationale"))}</p></div>
+    <div class="sec"><h5>Recommended technician resolution path (not yet attempted)</h5><p>{esc(t.get("suggested_resolution_path"))}</p></div>
   </div>
 </div>
 """, unsafe_allow_html=True)

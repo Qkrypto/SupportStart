@@ -20,6 +20,7 @@ from datetime import datetime
 import config
 import knowledge_base as kb
 import safety
+import triage
 from engine import Turn
 from strings import L, tr
 
@@ -35,9 +36,31 @@ BYPASS = re.compile(
     r"(someone|somebody) else'?s (account|password)|another (user|student|person)'?s (account|password)|"
     r"desbloquear|evadir|saltar(se)? el filtro|quitar (el )?filtro|"
     r"cuenta de otra persona|contraseña de otra persona)\b", re.I)
-HELP = re.compile(r"\b(need help|help with this step|necesito ayuda|no s[eé] c[oó]mo|don'?t know how|stuck|how do i)\b", re.I)
-MULTI = re.compile(r"\b(others too|otros tambi[eé]n|multiple|everyone|todos|whole class|toda la clase)\b", re.I)
-NEGATIVE = re.compile(r"\b(still|sigue|not|no)\b", re.I)
+# Natural requests for step clarification (EN/ES). Broad on purpose: the audit
+# found "I don't understand this step" was silently treated as a failed result.
+HELP = re.compile(
+    r"\b(need help|help with this step|don'?t know how|not sure how|how do i|how do you|"
+    r"i (don'?t|do not) understand|don'?t understand|didn'?t understand|i'?m confused|"
+    r"i am confused|confused|what does that mean|what do you mean|not clear|unclear|"
+    r"can you explain|please explain|explain that|explain this|make (that|this) simpler|"
+    r"simpler|in simpler terms|where (do i|do you|can i) find|i (don'?t|do not|can'?t) see (that|the|it)|"
+    r"i don'?t see (that|the) (option|button|menu)|can'?t find (it|that|the)|stuck|i'?m stuck|"
+    r"necesito ayuda|no s[eé] c[oó]mo|no entiendo|no lo entiendo|estoy confundid[oa]|"
+    r"qu[eé] significa|puede explicar|expl[ií]que|m[aá]s simple|no veo esa opci[oó]n|"
+    r"no veo el bot[oó]n|d[oó]nde encuentro|d[oó]nde est[aá]|no lo encuentro)\b", re.I)
+# MULTI stays for the scope answer; broader outage detection lives in triage.
+MULTI = re.compile(r"\b(others too|otros tambi[eé]n|multiple|everyone|todos|whole class|toda la clase|"
+                   r"several|many of us|all of us|nobody|no one|everybody)\b", re.I)
+NEGATIVE = re.compile(r"\b(still|sigue|not|no|nope|doesn'?t|didn'?t)\b", re.I)
+
+# Workstation flows that are inherently OS-specific. When the device is unknown
+# and the user only said a generic word ("laptop"), we ask before serving these.
+WORKSTATION_BY_DEVICE = {
+    "Mac": "macos_basic",
+    "Windows laptop/desktop": "windows_general",
+    "Chromebook": "chromebook_frozen",
+}
+OS_SPECIFIC_ENTRIES = set(WORKSTATION_BY_DEVICE.values())
 
 GENERIC_HELP = kb.B(
     "No problem. Let's slow down. Read the card again one line at a time, and only do the "
@@ -98,27 +121,31 @@ def _blank_memory() -> dict:
         "troubleshooting_steps_attempted": [],
         "resolved_status": None,      # None | True | False
         "escalation_needed": False,
+        "multiuser_confirmed": False,
+        "corrections": [],            # audit trail of corrected assumptions
+        "location_context": None,     # "remote" | "on_campus"
     }
 
 
 def new_state(category: str) -> dict:
     return {"category": category if category in config.CATEGORY_LABELS else "other",
             "entry_id": None, "candidates": [], "stage": "describe", "idx": 0,
-            "answers": {}, "multiuser": False, "impact": "",
+            "answers": {}, "multiuser": False, "sitewide": False, "impact": "",
             "failed_steps": [], "done": False,
             "memory": _blank_memory(), "asked_device": False,
+            "match_confidence": 0.0, "os_clarify": False,
             "pending_prefix": ""}
 
 
 def infer_device(text: str, intake: dict | None = None) -> str | None:
-    """Infer a device_type from the user's words or the intake profile."""
+    """Infer a device_type from EXPLICIT evidence or the intake profile.
+
+    Generic words like 'laptop'/'computer' resolve to None (see triage.infer_device)
+    so the engine asks for the OS instead of assuming Windows.
+    """
     if intake and intake.get("device") and intake["device"] != config.DEVICE_TYPES["other"][0]:
         return intake["device"]
-    t = f" {text.lower()} "
-    for kw, dev in DEVICE_KEYWORDS.items():
-        if kw in t:
-            return dev
-    return None
+    return triage.infer_device(text)
 
 
 def _device_relevant(entry: dict | None) -> bool:
@@ -163,13 +190,12 @@ class DemoEngine:
         """Issue-first opener: invite the problem description immediately."""
         name = (intake.get("name") or "").split()[0] if intake.get("name") else ""
         greet = {
-            "en": (f"Hi{', ' + name if name else ''}! I'm your AI support assistant. "
-                   "Tell me what's wrong in a sentence or two, and we'll try to fix it "
-                   "together. If we can't, I'll write a clear summary you can send to IT."),
-            "es": (f"¡Hola{', ' + name if name else ''}! Soy su asistente de soporte con "
-                   "inteligencia artificial. Cuénteme qué pasa en una o dos oraciones y lo "
-                   "intentamos arreglar juntos. Si no podemos, escribiré un resumen claro que "
-                   "puede enviar a TI."),
+            "en": (f"Hi{', ' + name if name else ''}, I'm your AI support assistant. Describe "
+                   "what's happening in a sentence or two and we'll try to fix it. If we can't, "
+                   "I'll write a clean summary for IT."),
+            "es": (f"Hola{', ' + name if name else ''}, soy su asistente de soporte con "
+                   "inteligencia artificial. Describa qué sucede en una o dos oraciones y lo "
+                   "intentamos arreglar. Si no podemos, escribiré un resumen claro para TI."),
         }[lang]
         return Turn(
             reply=greet,
@@ -188,19 +214,42 @@ class DemoEngine:
             return self._boundary_turn(state, user_text, lang), state
         stage = state["stage"]
         log = []
-
         mem = state["memory"]
+
+        # Terminal guard: once we've escalated/resolved, never index into a step
+        # or question again. Re-offer the summary safely (audit crash fix).
+        if state.get("done") or stage in ("escalated", "resolved", "boundary"):
+            entry = _entry(state) or kb.BY_ID["general_it"]
+            if mem.get("resolved_status"):
+                return self._closed_turn(entry, lang), state
+            return self._reoffer_turn(entry, state, lang), state
+
+        # Corrections can arrive at any active stage after the first description.
+        if stage in ("questions", "steps", "scope", "device"):
+            corrected = self._apply_correction(state, user_text, intake, lang, log)
+            if corrected is not None:
+                return corrected, state
 
         if stage == "describe":
             log.append({"kind": "info_collected", "detail": f"Issue description: {user_text}"})
             mem["issue_summary"] = user_text
-            # Infer and remember the device from the user's own words (no re-asking).
+            # Detect scope early so wider outages are prioritized from the start.
+            if triage.is_multiuser(user_text) or triage.is_sitewide(user_text):
+                state["multiuser"] = True
+                mem["multiuser_confirmed"] = True
+                if triage.is_sitewide(user_text):
+                    state["sitewide"] = True
+                log.append({"kind": "finding",
+                            "detail": "Scope: multiple users / possible outage detected in the "
+                                      "initial report. Escalation threshold lowered."})
+            # Infer and remember the device from EXPLICIT words (never from "laptop").
             dev = infer_device(user_text, intake)
             if dev:
                 mem["device_type"] = dev
                 log.append({"kind": "finding", "detail": f"Inferred device type: {dev}"})
             entry, candidates, conf = kb.select_entry(
                 user_text, state["category"], mem.get("device_type") or (intake or {}).get("device"))
+            state["match_confidence"] = float(conf or 0.0)
             if entry is None:
                 state["candidates"] = [c["id"] for c in candidates]
                 state["stage"] = "disambiguate"
@@ -211,6 +260,20 @@ class DemoEngine:
                 return self._q_turn(tr(DISAMBIG_Q, lang), quick,
                                     {"en": "Narrowing it down", "es": "Acotando el problema"}[lang],
                                     state, lang, log, confidence=40), state
+            # OS-specific workstation flow but the device is unknown (generic word
+            # like "laptop"): ask for the OS before giving OS-specific steps.
+            if (entry["id"] in OS_SPECIFIC_ENTRIES and mem.get("device_type") is None
+                    and not (intake or {}).get("device")):
+                self._select(state, entry, log)
+                mem["software_or_system"] = entry["product"]
+                state["os_clarify"] = True
+                state["asked_device"] = True
+                state["stage"] = "device"
+                state["pending_prefix"] = self._restate(entry, lang)
+                quick = [v[0 if lang == "en" else 1] for v in config.DEVICE_TYPES.values()]
+                return self._q_turn(tr(DEVICE_Q, lang), quick,
+                                    {"en": "Identifying device", "es": "Identificando equipo"}[lang],
+                                    state, lang, log), state
             self._select(state, entry, log)
             mem["software_or_system"] = entry["product"]
             return self._after_match(state, intake, lang, log), state
@@ -219,6 +282,17 @@ class DemoEngine:
             dev = self._match_device(user_text)
             mem["device_type"] = dev
             log.append({"kind": "info_collected", "detail": f"Device type: {dev}"})
+            # If we asked to disambiguate an OS-specific workstation flow, re-route
+            # (or restore the flow's own stage so we don't fall through to escalation).
+            if state.pop("os_clarify", False):
+                rerouted = self._reroute_for_device(state, dev, log)
+                if rerouted is not None:
+                    self._select(state, rerouted, log)
+                    mem["software_or_system"] = rerouted["product"]
+                else:
+                    cur = _entry(state) or kb.BY_ID["general_it"]
+                    state["stage"] = "questions" if cur["questions"] else "steps"
+                    state["idx"] = 0
             return self._serve_current(state, intake, lang, log), state
 
         if stage == "disambiguate":
@@ -233,6 +307,7 @@ class DemoEngine:
                                     kb.BY_ID["general_it"])
                 state["entry_id"] = fallback["id"]
                 state["done"] = True
+                state["stage"] = "escalated"
                 log.append({"kind": "finding",
                             "detail": "Clarification did not match a known troubleshooting flow, "
                                       "escalating directly instead of guessing."})
@@ -264,7 +339,17 @@ class DemoEngine:
         entry = _entry(state) or kb.BY_ID["general_it"]
 
         if stage == "questions":
+            # Bounds guard: if idx is past the list (e.g. after a re-route), move on.
+            if state["idx"] >= len(entry["questions"]):
+                return self._serve_current(state, intake, lang, log), state
             node = entry["questions"][state["idx"]]
+            # A clarification request on a question: re-ask, don't consume it as an answer.
+            if HELP.search(user_text) and not (node.get("quick")
+                                               and user_text.strip() in [tr(q, lang) for q in node["quick"]]):
+                log.append({"kind": "finding", "detail": f"User asked for clarification on: {node['label']}"})
+                return self._q_turn(tr(node["q"], lang), [tr(q, lang) for q in node.get("quick", [])],
+                                    tr(node["status"], lang), state, lang, log,
+                                    prefix=tr(GENERIC_HELP, lang)), state
             log.append({"kind": "info_collected", "detail": f"{node['label']}: {user_text}"})
             if "error" in node["label"].lower() and user_text.strip().lower() not in (
                     "none", "ninguno", "no", "n/a", ""):
@@ -273,11 +358,15 @@ class DemoEngine:
             return self._serve_current(state, intake, lang, log), state
 
         if stage == "steps":
+            # Bounds guard: no step at this index -> transition (never IndexError).
+            if state["idx"] >= len(entry["steps"]):
+                return self._serve_current(state, intake, lang, log), state
             step = entry["steps"][state["idx"]]
             title = tr(step["title"], "en")
+            # Clarification request: re-explain the SAME step; do not advance and do
+            # not record it as a failed result (audit fix).
             if HELP.search(user_text):
-                log.append({"kind": "finding", "detail": f"User needed help with step: {title}"})
-                state["failed_steps"].append(title)
+                log.append({"kind": "finding", "detail": f"User asked for help understanding step: {title}"})
                 help_text = tr(step.get("help", GENERIC_HELP), lang)
                 return self._step_turn(step, state, lang, log, prefix=help_text), state
             log.append({"kind": "step_attempted", "detail": title})
@@ -287,6 +376,7 @@ class DemoEngine:
                 log.append({"kind": "finding", "detail": "Issue confirmed resolved by user."})
                 mem["resolved_status"] = True
                 state["done"] = True
+                state["stage"] = "resolved"
                 return self._resolved_turn(entry, intake, lang, log, resolving_step=title), state
             state["failed_steps"].append(title)
             state["idx"] += 1
@@ -295,17 +385,15 @@ class DemoEngine:
         if stage == "scope":
             state["answers"]["scope"] = user_text
             log.append({"kind": "info_collected", "detail": f"Scope of impact: {user_text}"})
-            if MULTI.search(user_text):
+            if MULTI.search(user_text) or triage.is_multiuser(user_text):
                 state["multiuser"] = True
+                mem["multiuser_confirmed"] = True
                 log.append({"kind": "finding",
                             "detail": "Multiple users affected. Escalation threshold met."})
-            mem["resolved_status"] = False
-            mem["escalation_needed"] = True
-            state["done"] = True
-            return self._escalation_turn(entry, state, lang, log), state
+            return self._go_escalate(entry, state, lang, log), state
 
-        # done / overflow. Repeat escalation offer politely
-        return self._escalation_turn(entry, state, lang, log), state
+        # Any other stage falls through to a safe escalation offer.
+        return self._go_escalate(entry, state, lang, log), state
 
     # ----------------------------------------------------------- helpers
     def _select(self, state: dict, entry: dict, log: list):
@@ -396,20 +484,136 @@ class DemoEngine:
                                     tr(node["status"], lang), state, lang, log)
             state["stage"], state["idx"] = "steps", 0
         if state["stage"] == "steps":
-            if state["idx"] < len(entry["steps"]):
+            # Multi-user / outage: allow at most ONE quick diagnostic step to
+            # distinguish a local fault from a wider outage, then escalate. Don't
+            # make an affected user grind through the full single-device sequence.
+            step_cap = 1 if state.get("multiuser") else len(entry["steps"])
+            if state["idx"] < min(len(entry["steps"]), step_cap):
                 return self._step_turn(entry["steps"][state["idx"]], state, lang, log)
-            if entry.get("security_fast"):
-                mem["escalation_needed"] = True
-                state["done"] = True
-                return self._escalation_turn(entry, state, lang, log)
+            if entry.get("security_fast") or state.get("multiuser"):
+                return self._go_escalate(entry, state, lang, log)
             state["stage"] = "scope"
         if state["stage"] == "scope":
             return self._q_turn(tr(SCOPE_Q, lang), [tr(q, lang) for q in SCOPE_QUICK],
                                 {"en": "Checking who's affected", "es": "Verificando a quién afecta"}[lang],
                                 state, lang, log)
-        mem["escalation_needed"] = True
+        return self._go_escalate(entry, state, lang, log)
+
+    def _go_escalate(self, entry, state, lang, log) -> Turn:
+        """Single exit into escalation; marks the session terminal so a follow-up
+        message can never index a step/question again (audit crash fix)."""
+        state["memory"]["escalation_needed"] = True
+        state["memory"]["resolved_status"] = False
         state["done"] = True
+        state["stage"] = "escalated"
         return self._escalation_turn(entry, state, lang, log)
+
+    # ------------------------------------------------------- corrections
+    def _reroute_for_device(self, state: dict, device: str, log: list) -> dict | None:
+        """When an OS-specific workstation flow is active and the user names a
+        different OS, return the matching flow so we don't give wrong-OS steps."""
+        cur = state.get("entry_id")
+        target_id = WORKSTATION_BY_DEVICE.get(device)
+        if cur in OS_SPECIFIC_ENTRIES and target_id and target_id != cur:
+            log.append({"kind": "finding",
+                        "detail": f"Re-routed from '{cur}' to '{target_id}' after device corrected to {device}."})
+            return kb.BY_ID[target_id]
+        return None
+
+    def _apply_correction(self, state: dict, user_text: str, intake: dict,
+                          lang: str, log: list) -> Turn | None:
+        """Detect and apply a user correction. Returns a Turn when the correction
+        changes the flow, else None to let normal processing continue."""
+        mem = state["memory"]
+        c = triage.detect_correction(user_text, mem)
+        if not c:
+            return None
+
+        if c["kind"] == "device":
+            old = mem.get("device_type")
+            mem["device_type"] = c["value"]
+            mem.setdefault("corrections", []).append(f"device: {old or 'unknown'} -> {c['value']}")
+            log.append({"kind": "finding",
+                        "detail": f"Correction: device updated from {old or 'unknown'} to {c['value']}."})
+            rerouted = self._reroute_for_device(state, c["value"], log)
+            if rerouted is not None:
+                self._select(state, rerouted, log)
+                mem["software_or_system"] = rerouted["product"]
+                state["pending_prefix"] = self._restate(rerouted, lang)
+                ack = {"en": f"Thanks for clarifying. Let me switch to the {c['value']} steps.",
+                       "es": f"Gracias por aclararlo. Cambiaré a los pasos para {c['value']}."}[lang]
+                state["pending_prefix"] = ack + " " + state["pending_prefix"]
+                return self._serve_current(state, intake, lang, log)
+            # Same flow: just acknowledge and re-serve the current step/question.
+            state["pending_prefix"] = {
+                "en": f"Got it, this is a {c['value']}. Let's continue.",
+                "es": f"Entendido, es un {c['value']}. Continuemos."}[lang]
+            return self._serve_current(state, intake, lang, log)
+
+        if c["kind"] == "scope":
+            state["multiuser"] = True
+            mem["multiuser_confirmed"] = True
+            mem.setdefault("corrections", []).append("scope: single -> multiple users")
+            log.append({"kind": "finding",
+                        "detail": "Correction: issue now reported as affecting multiple users; "
+                                  "priority raised and routing to escalation."})
+            entry = _entry(state) or kb.BY_ID["general_it"]
+            return self._go_escalate(entry, state, lang, log)
+
+        if c["kind"] == "location":
+            mem["location_context"] = c["value"]
+            mem.setdefault("corrections", []).append(f"location: {c['value']}")
+            log.append({"kind": "info_collected",
+                        "detail": f"Location context corrected to: "
+                                  f"{'working remotely' if c['value'] == 'remote' else 'on campus'}."})
+            return self._serve_current(state, intake, lang, log)
+
+        if c["kind"] == "error":
+            mem["error_message"] = None
+            log.append({"kind": "finding", "detail": "User reports the error message changed."})
+            state["pending_prefix"] = {
+                "en": "Thanks, I'll note the error changed.",
+                "es": "Gracias, anotaré que el error cambió."}[lang]
+            return self._serve_current(state, intake, lang, log)
+
+        if c["kind"] == "issue":
+            mem.setdefault("corrections", []).append("issue: user says the matched problem was wrong")
+            log.append({"kind": "finding",
+                        "detail": "Correction: user says we matched the wrong issue; re-describing."})
+            state["stage"] = "describe"
+            state["entry_id"] = None
+            state["idx"] = 0
+            reask = {"en": "Sorry about that. In a sentence or two, what's the actual problem?",
+                     "es": "Disculpe. En una o dos oraciones, ¿cuál es el problema real?"}[lang]
+            return Turn(reply=reask, phase="intake",
+                        status_label={"en": "Listening", "es": "Escuchando"}[lang],
+                        issue_summary="", progress_current=1, progress_total=_total(state),
+                        est_minutes_remaining=6, confidence=50, quick_replies=[], log_entries=log)
+        return None
+
+    def _reoffer_turn(self, entry, state, lang) -> Turn:
+        """Re-show the escalation offer without adding new log entries (safe repeat)."""
+        reply = {
+            "en": "Your support summary is ready below. You can copy it into your official "
+                  "support request, or start a new session any time.",
+            "es": "Su resumen de soporte está listo abajo. Puede copiarlo en su solicitud oficial "
+                  "de soporte, o iniciar una nueva sesión cuando quiera.",
+        }[lang]
+        return Turn(reply=reply, phase="escalation_offer",
+                    status_label={"en": "Support summary available", "es": "Resumen disponible"}[lang],
+                    issue_summary=tr(entry["issue"], lang),
+                    progress_current=_total(state), progress_total=_total(state),
+                    est_minutes_remaining=1, confidence=15, quick_replies=[], log_entries=[],
+                    escalation_reason=tr(entry.get("esc_reason", ""), "en") if entry.get("esc_reason") else "")
+
+    def _closed_turn(self, entry, lang) -> Turn:
+        reply = {"en": "Glad that's sorted. If anything else comes up, start a new session any time.",
+                 "es": "Me alegra que esté resuelto. Si surge algo más, inicie una nueva sesión cuando quiera."}[lang]
+        return Turn(reply=reply, phase="resolved",
+                    status_label={"en": "Resolved", "es": "Resuelto"}[lang],
+                    issue_summary=tr(entry["issue"], lang) if entry else "",
+                    progress_current=1, progress_total=1,
+                    est_minutes_remaining=0, confidence=95, quick_replies=[], log_entries=[])
 
     def _base(self, state: dict, lang: str) -> dict:
         entry = _entry(state)
@@ -420,11 +624,11 @@ class DemoEngine:
         }
 
     def _q_turn(self, question: str, quick: list, status: str, state, lang, log,
-                confidence: int | None = None) -> Turn:
+                confidence: int | None = None, prefix: str = "") -> Turn:
         b = self._base(state, lang)
-        prefix = state.get("pending_prefix") or ""
-        if prefix:
-            question = f"{prefix}\n\n{question}"
+        lead = prefix or state.get("pending_prefix") or ""
+        if lead:
+            question = f"{lead}\n\n{question}"
             state["pending_prefix"] = ""
         return Turn(reply=question, phase="diagnosis" if state["stage"] != "describe" else "intake",
                     status_label=status, quick_replies=quick, log_entries=log,
@@ -487,6 +691,7 @@ class DemoEngine:
         """Polite refusal + safe alternative for bypass/restriction requests."""
         state["entry_id"] = "restricted_request"
         state["done"] = True
+        state["stage"] = "boundary"
         reason = ("User requested help circumventing a district protection (filter, monitoring, "
                   "device management, or account access). Refused per policy; converted to a "
                   "restriction-review request for the responsible team.")
@@ -529,6 +734,23 @@ class DemoEngine:
 # ---------------------------------------------------------------------------
 # Offline ticket generation (from KB routing + session log + intake)
 # ---------------------------------------------------------------------------
+def _impact_phrase(issue_text: str) -> str:
+    """Best-effort operational-impact label from the issue text. Never invented
+    beyond what the words support; defaults to a neutral statement."""
+    t = issue_text or ""
+    if any(k in t for k in ("testing", "exam", "assessment", "examen", "prueba")):
+        return "may affect active testing"
+    if any(k in t for k in ("attendance", "asistencia")):
+        return "may affect attendance"
+    if any(k in t for k in ("payroll", "nómina", "nomina")):
+        return "may affect payroll/business operations"
+    if any(k in t for k in ("teach", "class", "lesson", "instruction", "clase", "enseñ")):
+        return "may affect instruction"
+    if any(k in t for k in ("safety", "seguridad", "emergency", "emergencia")):
+        return "may affect safety systems"
+    return "not specified by the user"
+
+
 def demo_ticket(intake: dict, log: list[dict], state: dict, reason: str, lang: str) -> dict:
     entry = kb.BY_ID.get(state.get("entry_id") or "general_it", kb.BY_ID["general_it"])
     r = entry["routing"]
@@ -544,66 +766,101 @@ def demo_ticket(intake: dict, log: list[dict], state: dict, reason: str, lang: s
     performed = [{"step": s, "result": x} for s, x in zip(steps, results)] or \
                 [{"step": "Guided intake only", "result": "No troubleshooting steps before escalation"}]
 
-    # Priority: base from KB, raised by inferred operational impact + scope.
-    priority = r["priority"]
-    issue_text = (state.get("memory", {}).get("issue_summary") or "").lower()
-    if any(k in issue_text for k in ("testing", "test ", "exam", "safety", "security", "outage")):
-        priority = "Urgent"
-    elif any(k in issue_text for k in ("class", "teach", "instruction", "lesson", "attendance",
-                                       "clase", "enseñ", "asistencia")):
-        priority = bump(priority)
-    if state.get("multiuser"):
-        priority = bump(priority)
+    mem = state.get("memory", {})
+    issue_text = (mem.get("issue_summary") or "").lower()
 
-    scope = state.get("answers", {}).get("scope", "Not provided")
-    impact_txt = (f"Scope: {scope}. "
-                  f"{'Multiple users affected.' if state.get('multiuser') else 'Single user affected.'}")
+    # Priority + risk from a single consistent rule set (never contradictory).
+    priority, risk, pr_rationale = triage.normalize_priority_risk(
+        r["priority"], r["risk"], issue_text=issue_text,
+        multiuser=bool(state.get("multiuser")), sitewide=bool(state.get("sitewide")),
+        security=bool(entry.get("security_fast")),
+        has_workaround=False,
+    )
+
+    # Device + OS. Prefer the confirmed device; fall back to intake; never invent.
+    device = mem.get("device_type") or intake.get("device") or "Not provided"
+    os_known = device if device in ("Windows laptop/desktop", "Mac", "Chromebook",
+                                     "iPad / tablet") else "Not provided"
+
+    scope = state.get("answers", {}).get("scope")
+    if state.get("sitewide"):
+        scope_txt = "Site-wide / outage reported"
+    elif state.get("multiuser"):
+        scope_txt = "Multiple users affected"
+    elif scope:
+        scope_txt = scope
+    else:
+        scope_txt = "Single user (scope not explicitly confirmed)"
+    impact_txt = f"{scope_txt}. Operational impact: {_impact_phrase(issue_text)}."
+
     location = ", ".join(x for x in [intake.get("campus"), intake.get("building"), intake.get("room")] if x) \
                or "Not provided"
     errors = [d.split(":", 1)[1].strip() for d in info
               if "error" in d.split(":", 1)[0].lower()
               and d.split(":", 1)[1].strip().lower() not in ("none", "ninguno", "no", "n/a", "")]
+    if mem.get("error_message") and mem["error_message"] not in errors:
+        errors.append(mem["error_message"])
+
+    # What a technician would still need to ask (based on what's missing).
+    tech_needs = []
+    if not errors:
+        tech_needs.append("Exact on-screen error message (not observed during self-service).")
+    if os_known == "Not provided":
+        tech_needs.append("Operating system / exact device model (not confirmed by the user).")
+    if not state.get("multiuser") and not scope:
+        tech_needs.append("Whether any other users are affected (single-user assumed).")
+    tech_needs.append(f"Confirm current state after: {tr(r['path'], 'en')}")
+    if mem.get("corrections"):
+        tech_needs.append("Note: user corrected earlier details mid-session (see corrections).")
 
     description = (
         f"Reported by {intake.get('name', 'user')} ({intake.get('role', 'unknown role')}) at {location}. "
-        f"Device: {intake.get('device', 'Not provided')}. Product: {entry['product']}. "
+        f"Device: {device}. Product: {entry['product']}. "
         + ("Information collected: " + "; ".join(info) + ". " if info else "")
         + f"Escalated because: {reason}"
     )
 
     return {
-        "title": f"{tr(entry['issue'], 'en')}, {intake.get('campus', '')}".rstrip(","),
+        "title": f"{tr(entry['issue'], 'en')}, {intake.get('campus', '')}".rstrip(", "),
         "executive_summary": (
-            f"{tr(entry['issue'], 'en')} affecting {'multiple users' if state.get('multiuser') else 'one user'} "
-            f"at {intake.get('campus', 'unknown site')}. Guided self-service troubleshooting completed "
-            f"without resolution; technician action required."
+            f"{tr(entry['issue'], 'en')} affecting "
+            f"{'multiple users' if state.get('multiuser') else 'one user'} "
+            f"at {intake.get('campus') or 'an unspecified site'}. Guided self-service troubleshooting "
+            f"{'was completed without resolution' if steps else 'was not applicable'}; technician action required."
         ),
         "detailed_description": description,
         "symptoms": info or [tr(entry["issue"], "en")],
-        "environment": f"District-managed environment. KB entry: {entry['id']}. "
+        "environment": f"District-managed environment. Operating system: {os_known}. "
+                       f"KB entry: {entry['id']}. "
                        f"Session language: {'Spanish' if lang == 'es' else 'English'}. "
                        f"Data sensitivity: {intake.get('data_type', 'unknown')}.",
-        "device_information": intake.get("device", "Not provided"),
+        "device_information": device,
+        "operating_system": os_known,
         "user_location": location,
         "user_name": intake.get("name", "Not provided"),
         "user_email": intake.get("email", "Not provided"),
         "user_role": intake.get("role", "Not provided"),
         "applications_involved": [entry["product"]],
-        "error_messages": errors or ["None reported"],
+        "error_messages": errors or ["Not observed"],
         "business_impact": impact_txt,
         "impact": impact_txt,
+        "affected_scope": scope_txt,
         "troubleshooting_performed": performed,
+        "technician_needs": tech_needs,
+        "corrections": mem.get("corrections", []),
         "assignment_group": r["group"],
         "assignment_rationale": tr(r["rationale"], "en"),
         "category": r["category"],
         "subcategory": r["sub"],
         "priority": priority,
-        "priority_rationale": (f"Base priority {r['priority']} raised to {priority} due to scope/operational impact."
-                               if priority != r["priority"]
-                               else config.PRIORITIES.get(priority, ("Standard priority.",))[0]),
-        "risk_level": r["risk"],
+        "priority_rationale": pr_rationale,
+        "risk_level": risk,
         "suggested_resolution_path": tr(r["path"], "en"),
-        "confidence_score": 78,
+        # Rule-based routing confidence = heuristic KB match strength (0-100).
+        # NOT model certainty, ticket accuracy, or production performance.
+        "routing_confidence": int(round(float(state.get("match_confidence") or 0.0) * 100)),
+        "routing_confidence_basis": "Heuristic knowledge-base match strength (deterministic). "
+                                    "Not model certainty or ticket accuracy.",
         "estimated_technician_effort": r["effort"],
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "ticket_ref": "DRAFT-" + datetime.now().strftime("%Y%m%d-%H%M%S"),

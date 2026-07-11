@@ -23,12 +23,18 @@ TICKET_TOOL = {
             "symptoms": {"type": "array", "items": {"type": "string"}},
             "environment": {"type": "string"},
             "device_information": {"type": "string"},
+            "operating_system": {"type": "string",
+                                 "description": "Windows / Mac / Chromebook / iPad / Not provided. "
+                                                "Use 'Not provided' unless the user identified it."},
             "user_location": {"type": "string", "description": "Campus / building / room / remote."},
             "applications_involved": {"type": "array", "items": {"type": "string"}},
-            "error_messages": {"type": "array", "items": {"type": "string"}},
+            "error_messages": {"type": "array", "items": {"type": "string"},
+                               "description": "Exact messages. Use ['Not observed'] if none were seen."},
             "business_impact": {"type": "string"},
             "impact": {"type": "string",
                        "description": "Instructional/operational/testing/payroll/parent access; single or multiple users."},
+            "affected_scope": {"type": "string",
+                               "description": "Single user, multiple users, classroom, or site-wide."},
             "troubleshooting_performed": {
                 "type": "array",
                 "items": {
@@ -36,6 +42,11 @@ TICKET_TOOL = {
                     "properties": {"step": {"type": "string"}, "result": {"type": "string"}},
                     "required": ["step", "result"],
                 },
+            },
+            "technician_needs": {
+                "type": "array", "items": {"type": "string"},
+                "description": "What the technician still needs to confirm or ask. Use 'Not provided' / "
+                               "'Not observed' / 'Needs confirmation' where information is missing.",
             },
             "assignment_group": {"type": "string", "enum": config.ASSIGNMENT_GROUPS},
             "assignment_rationale": {"type": "string"},
@@ -45,16 +56,16 @@ TICKET_TOOL = {
             "priority_rationale": {"type": "string"},
             "risk_level": {"type": "string", "enum": config.RISK_LEVELS},
             "suggested_resolution_path": {"type": "string"},
-            "confidence_score": {"type": "integer"},
             "estimated_technician_effort": {"type": "string"},
         },
         "required": [
             "title", "executive_summary", "detailed_description", "symptoms",
-            "environment", "device_information", "user_location",
+            "environment", "device_information", "operating_system", "user_location",
             "applications_involved", "error_messages", "business_impact", "impact",
-            "troubleshooting_performed", "assignment_group", "assignment_rationale",
+            "affected_scope", "troubleshooting_performed", "technician_needs",
+            "assignment_group", "assignment_rationale",
             "category", "subcategory", "priority", "priority_rationale",
-            "risk_level", "suggested_resolution_path", "confidence_score",
+            "risk_level", "suggested_resolution_path",
             "estimated_technician_effort",
         ],
     },
@@ -66,9 +77,16 @@ problem immediately without re-asking anything.
 
 Rules:
 - Write the ticket in ENGLISH regardless of conversation language (technicians work in English).
-- Use ONLY facts from the intake, log, and conversation. Unknown -> "Not provided". Never invent.
-- NEVER include passwords, grades, or confidential student data, even if the user typed them.
+- Use ONLY facts from the intake, log, and conversation. Unknown -> "Not provided",
+  "Not observed", or "Needs confirmation". NEVER invent an OS, error, scope, or impact.
+- Do NOT infer an operating system from generic words like "laptop" or "computer";
+  set operating_system to "Not provided" unless the user actually identified it.
+- NEVER include passwords, student IDs, grades, medical or discipline data, even if the user typed them.
 - troubleshooting_performed must include every step attempted and its actual result.
+- technician_needs must list what is still missing (error text, OS, scope, etc.) so the
+  technician knows what to ask; do not repeat what is already answered.
+- Keep priority and risk consistent: a multi-user/classroom/site-wide outage must not be
+  "Urgent priority / Low risk"; raise risk to at least Medium when multiple users are affected.
 - Priorities: {json.dumps({k: v[0] for k, v in config.PRIORITIES.items()})}
 - Categories: {json.dumps(config.CATEGORIES)}
 - Precise, neutral, complete; technician audience.
@@ -144,6 +162,24 @@ def ticket_to_markdown(t: dict) -> str:
     bullets = lambda items: "\n".join(f"  - {x}" for x in items) if items else "  - Not provided"
     pr = t.get("priority", "Medium")
     pr_desc = config.PRIORITIES.get(pr, ("",))[0]
+
+    # Optional sections, only rendered when present (keeps AI + demo shapes compatible).
+    os_line = f"\nOPERATING SYSTEM\n  {t['operating_system']}\n" if t.get("operating_system") else ""
+    scope_line = f"\nAFFECTED SCOPE\n  {t['affected_scope']}\n" if t.get("affected_scope") else ""
+    tech_needs = t.get("technician_needs") or []
+    needs_block = ("\nTECHNICIAN STILL NEEDS TO CONFIRM\n" + bullets(tech_needs) + "\n") if tech_needs else ""
+    corrections = t.get("corrections") or []
+    corr_block = ("\nCORRECTIONS DURING SESSION\n" + bullets(corrections) + "\n") if corrections else ""
+
+    # Rule-based routing confidence: shown only when we have a defensible number,
+    # and clearly labeled as heuristic KB match strength (not model certainty).
+    rc = t.get("routing_confidence")
+    if rc is not None:
+        basis = t.get("routing_confidence_basis", "Heuristic knowledge-base match strength.")
+        conf_line = f"  Rule-based routing confidence: {rc}% ({basis})\n"
+    else:
+        conf_line = ""
+
     return f"""SUPPORT TICKET (DRAFT), {t.get('ticket_ref', '')}
 Created: {t.get('created_at', '')} | Generated by {config.APP_NAME}
 
@@ -170,7 +206,7 @@ ENVIRONMENT
 
 DEVICE INFORMATION
   {t['device_information']}
-
+{os_line}{scope_line}
 APPLICATIONS INVOLVED
 {bullets(t.get('applications_involved', []))}
 
@@ -180,9 +216,9 @@ ERROR MESSAGES
 IMPACT
   {t.get('impact', t.get('business_impact', 'Not provided'))}
 
-TROUBLESHOOTING PERFORMED
+TROUBLESHOOTING COMPLETED (self-service)
 {steps}
-
+{needs_block}{corr_block}
 ROUTING
   Assignment Group: {t['assignment_group']}
   Rationale: {t['assignment_rationale']}
@@ -191,10 +227,9 @@ ROUTING
   Priority Rationale: {t['priority_rationale']}
   Risk Level: {t['risk_level']}
 
-SUGGESTED RESOLUTION PATH
+RECOMMENDED TECHNICIAN RESOLUTION PATH (not yet attempted)
   {t['suggested_resolution_path']}
 
-AI ASSESSMENT
-  Confidence Score: {t['confidence_score']}%
-  Estimated Technician Effort: {t['estimated_technician_effort']}
+TRIAGE METADATA
+{conf_line}  Estimated Technician Effort: {t['estimated_technician_effort']}
 """

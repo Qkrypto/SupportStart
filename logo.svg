@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="SupportStart logo">
+  <defs>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-90%" y="-90%" width="280%" height="280%"><feGaussianBlur stdDeviation="12"/></filter>
+    <radialGradient id="dish" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="#1c1b2e"/><stop offset="1" stop-color="#101019"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="82" fill="url(#dish)"/>
+  <circle cx="100" cy="100" r="60" fill="none" stroke="#4b3fae" stroke-width="9" opacity=".38"/>
+  <circle cx="100" cy="100" r="60" fill="none" stroke="#6d5ef0" stroke-width="16"
+          stroke-dasharray="79.25 15" stroke-dashoffset="86.75" filter="url(#soft)" opacity=".8"/>
+  <circle cx="100" cy="100" r="60" fill="none" stroke="#8b7bf7" stroke-width="9"
+          stroke-dasharray="79.25 15" stroke-dashoffset="86.75" filter="url(#glow)"/>
+  <circle cx="100" cy="100" r="60" fill="none" stroke="#d6ccff" stroke-width="3.5"
+          stroke-dasharray="79.25 15" stroke-dashoffset="86.75"/>
+  <text x="100" y="126" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="70" font-weight="800" fill="#8b7bf7" filter="url(#glow)">S</text>
+  <text x="100" y="126" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="70" font-weight="800" fill="#efe9ff">S</text>
+</svg>

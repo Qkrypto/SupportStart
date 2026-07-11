@@ -50,18 +50,18 @@ PROMPTS = {
     },
     "device": {
         "en": "Last one. What type of device is this about?",
-        "es": "Última pregunta. ¿sobre qué tipo de equipo es el problema?",
+        "es": "Última pregunta. ¿Sobre qué tipo de equipo es el problema?",
     },
 }
 
 ERRORS = {
     "name": {
         "en": "I'm sorry, I didn't catch that. What should I call you?",
-        "es": "Disculpe, no entendí. ¿cómo le puedo llamar?",
+        "es": "Disculpe, no entendí. ¿Cómo le puedo llamar?",
     },
     "email": {
         "en": "That email doesn't look quite right. Could you type it again? (e.g., name@example.org)",
-        "es": "Ese correo no parece válido. ¿podría escribirlo de nuevo? (ej.: nombre@ejemplo.org)",
+        "es": "Ese correo no parece válido. ¿Podría escribirlo de nuevo? (ej.: nombre@ejemplo.org)",
     },
 }
 

@@ -7,8 +7,8 @@ Content dicts elsewhere use {"en": ..., "es": ...}; tr() picks the language.
 STRINGS = {
     # --- App chrome ---
     "tagline": {
-        "en": "A portfolio project exploring guided troubleshooting and support-ready summaries.",
-        "es": "Un proyecto de portafolio sobre solución guiada y resúmenes listos para soporte.",
+        "en": "AI support that starts with a fix.",
+        "es": "Soporte con IA que empieza por la solución.",
     },
     "prototype_title": {"en": "Prototype notice", "es": "Aviso de prototipo"},
     "prototype_notice": {
@@ -53,21 +53,19 @@ STRINGS = {
 
     # --- Welcome / landing ---
     "welcome_title": {
-        "en": "Tell me what's wrong, and we'll try to fix it together.",
-        "es": "Cuénteme qué pasa y lo intentamos arreglar juntos.",
+        "en": "What's going on with your tech?",
+        "es": "¿Qué pasa con su tecnología?",
     },
     "welcome_sub": {
-        "en": "I'll walk you through a few easy steps first. Most problems are fixed in a few "
-              "minutes. If we can't fix it, I'll write a clear summary you can copy into your "
-              "support request, so you don't have to explain it twice.",
-        "es": "Primero le muestro unos pasos fáciles. La mayoría de los problemas se arreglan en "
-              "unos minutos. Si no podemos, escribiré un resumen claro que puede copiar en su "
-              "solicitud de soporte, para que no tenga que explicarlo dos veces.",
+        "en": "A few quick steps solve most issues. If yours needs a technician, I'll hand them "
+              "a clear summary so you don't repeat yourself.",
+        "es": "Unos pasos rápidos resuelven la mayoría de los problemas. Si el suyo necesita un "
+              "técnico, le entregaré un resumen claro para que no tenga que repetirlo.",
     },
-    "chip_guided": {"en": "Guided, one step at a time", "es": "Guiado, un paso a la vez"},
-    "chip_noforms": {"en": "No forms to fill out", "es": "Sin formularios que llenar"},
+    "chip_guided": {"en": "Step-by-step", "es": "Paso a paso"},
+    "chip_noforms": {"en": "No forms", "es": "Sin formularios"},
     "chip_ticket": {"en": "Summary only if needed", "es": "Resumen solo si es necesario"},
-    "chip_bilingual": {"en": "English & Español", "es": "Inglés y Español"},
+    "chip_bilingual": {"en": "EN / ES", "es": "EN / ES"},
 
     # --- Sidebar ---
     "it_staff_options": {"en": "Portfolio / IT Staff Demo", "es": "Portafolio / Demo de personal de TI"},
@@ -158,11 +156,11 @@ STRINGS = {
     "keep_troubleshooting": {"en": "Keep troubleshooting", "es": "Seguir intentando"},
     "generate_ticket": {"en": "Create support-ready summary", "es": "Crear resumen listo para soporte"},
     "resolved_banner": {
-        "en": "Issue resolved. No support request needed. 🎉",
-        "es": "Problema resuelto. No se necesita solicitud de soporte. 🎉",
+        "en": "Issue resolved. No support request needed.",
+        "es": "Problema resuelto. No se necesita solicitud de soporte.",
     },
     "new_session": {"en": "Start a new session", "es": "Iniciar una nueva sesión"},
-    "thinking": {"en": "Analyzing your response", "es": "Analizando su respuesta"},
+    "thinking": {"en": "Booting your fix", "es": "Iniciando su solución"},
     "error_generic": {
         "en": "Something went wrong. Please try again.",
         "es": "Algo salió mal. Por favor intente de nuevo.",

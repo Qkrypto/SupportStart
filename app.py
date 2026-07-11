@@ -27,7 +27,7 @@ from engine import DiagnosticEngine, Turn
 from strings import L
 from ticket import generate_ticket, summary_to_text, ticket_to_markdown
 
-st.set_page_config(page_title=config.APP_NAME, page_icon="🛠️", layout="wide",
+st.set_page_config(page_title=config.APP_NAME, page_icon=":material/bolt:", layout="wide",
                    initial_sidebar_state="expanded")
 
 
@@ -170,7 +170,7 @@ def run_engine(user_text: str):
         st.rerun()
     ss.messages.append({"role": "user", "content": user_text, "step": None})
     ss.api_messages.append({"role": "user", "content": user_text})
-    with st.chat_message("assistant", avatar="🛠️"):
+    with st.chat_message("assistant", avatar=":material/robot_2:"):
         placeholder = st.empty()
         ui.thinking(placeholder, LANG)
         try:
@@ -283,10 +283,8 @@ def build_ticket(reason: str):
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(f"""
-<div style="display:flex; align-items:center; gap:10px; padding:4px 0 12px;">
-  <div style="width:34px;height:34px;border-radius:10px;background:var(--accent);
-       color:#fff;display:flex;align-items:center;justify-content:center;
-       font-weight:700;font-size:13px;">{config.ORG_SHORT}</div>
+<div style="display:flex; align-items:center; gap:9px; padding:4px 0 12px;">
+  {ui.logo_mark(30)}
   <div style="font-weight:650;font-size:14.5px;">{config.APP_NAME}</div>
 </div>
 """, unsafe_allow_html=True)
@@ -328,37 +326,38 @@ with st.sidebar:
 
     st.divider()
     if mode == "support" and st.session_state.ticket is None and user_message_count() > 0:
-        if st.button(f"🎫 {L('request_technician', LANG)}", use_container_width=True):
+        if st.button(f":material/support_agent: {L('request_technician', LANG)}", use_container_width=True):
             st.session_state.force_escalate = True
             st.rerun()
-    if st.button(f"↺ {L('start_over', LANG)}", use_container_width=True):
+    if st.button(f":material/refresh: {L('start_over', LANG)}", use_container_width=True):
         start_over()
         st.rerun()
 
     _urgent = "Urgent help" if LANG == "en" else "Ayuda urgente"
     st.markdown(f"""
 <div class="panel" style="margin-top:8px;">
-  <h4>📞 {_urgent}</h4>
+  <h4>{_urgent}</h4>
   <div style="font-size:13px;line-height:1.5;">{L('urgent_help', LANG, phone=config.SERVICE_DESK_PHONE)}</div>
 </div>
 """, unsafe_allow_html=True)
 
     # --- Advanced / IT-staff-only controls, collapsed by default ---
     st.divider()
-    with st.expander(f"🔧 {L('it_staff_options', LANG)}"):
+    with st.expander(f":material/tune: {L('it_staff_options', LANG)}"):
         adm = st.toggle("Admin mode", value=(st.session_state.mode == "admin"))
         new_mode = "admin" if adm else "support"
         if new_mode != st.session_state.mode:
             st.session_state.mode = new_mode
             st.rerun()
-        st.text_input("Anthropic API key", type="password", key="api_key_input",
-                      help="Optional. Enables the adaptive AI engine. Leave blank to use "
-                           "the built-in knowledge-base engine.")
+        # The API key is read only from environment/Streamlit Secrets. There is no
+        # on-page key field, so nothing sensitive is ever typed or shown in the browser.
         st.markdown(
             f"**Engine:** {'Claude AI + KB' if api_key else 'Built-in KB engine'}  \n"
             f"**Database:** {'Postgres (persistent)' if storage.using_postgres() else 'SQLite (local, resets on redeploy)'}  \n"
             f"**Email dispatch:** {'Configured' if mailer.is_configured() else 'Not configured'}"
         )
+        st.caption("Add ANTHROPIC_API_KEY in Streamlit Secrets to enable the AI engine. "
+                   "It is never entered or shown on this page.")
 
 
 # ---------------------------------------------------------------------------
@@ -384,15 +383,15 @@ if not ss.messages:
 turn: Turn = ss.last_turn
 entry = matched_entry()
 
-# Welcome hero + prototype disclaimer. Shown at the very start only.
+# Welcome hero. Shown at the very start only. Portfolio/demo framing now lives
+# on the landing page, so the app itself reads as a clean product.
 if user_message_count() == 0 and ss.ticket is None and not ss.identity_mode:
     ui.welcome_hero(LANG)
-    ui.prototype_notice(LANG)
 
 col_chat, col_side = st.columns([2.2, 1], gap="medium")
 
 with col_side:
-    ui.privacy_notice(LANG)
+    # Contextual safety only: shown when the matched issue may involve private data.
     if entry and set(entry["categories"]) & intake_flow.SENSITIVE_CATEGORIES:
         ui.sensitive_warning(LANG)
     if ss.identity_mode:
@@ -404,14 +403,14 @@ with col_side:
 <div class="panel">
   <h4>{L('ticket_panel', LANG)}</h4>
   <div style="font-size:12.5px;color:var(--muted);line-height:1.5;">
-    {("🎫 " + ui.esc(ss.ticket.get("title"))) if ss.ticket else ui.esc(L('no_ticket_yet', LANG))}
+    {ui.esc(ss.ticket.get("title")) if ss.ticket else ui.esc(L('no_ticket_yet', LANG))}
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 with col_chat:
     for i, msg in enumerate(ss.messages):
-        avatar = "🛠️" if msg["role"] == "assistant" else "🧑"
+        avatar = ":material/robot_2:" if msg["role"] == "assistant" else ":material/person:"
         with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
             if msg.get("step"):
@@ -435,28 +434,28 @@ with col_chat:
             st.info(L("dup_notice", LANG, n=len(ss.dup_matches),
                       campus=ss.intake.get("campus", "")))
         if ss.attachments:
-            st.caption(f"📎 {len(ss.attachments)} × " + ", ".join(a[0] for a in ss.attachments))
+            st.caption(f"{len(ss.attachments)} attachment(s): " + ", ".join(a[0] for a in ss.attachments))
 
         ui.summary_preview(t, LANG)
 
         summary_text = summary_to_text(t)
         c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
         with c1:
-            copy_clicked = st.button(f"📋 {L('copy_summary', LANG)}", type="primary",
+            copy_clicked = st.button(f":material/content_copy: {L('copy_summary', LANG)}", type="primary",
                                      use_container_width=True)
         with c2:
             st.download_button(L("download_txt", LANG), summary_text,
                                file_name=f"support-summary-{t['ticket_ref']}.txt",
                                use_container_width=True)
         with c3:
-            edit_mode = st.toggle(f"✏️ {L('edit_ticket', LANG)}")
+            edit_mode = st.toggle(f":material/edit: {L('edit_ticket', LANG)}")
         with c4:
             if st.button(L("start_over", LANG), key="ticket_restart", use_container_width=True):
                 start_over()
                 st.rerun()
 
         # Copy-ready text. Always available, opened on demand
-        with st.expander(f"📄 {L('sum_copyready', LANG)}", expanded=copy_clicked):
+        with st.expander(f":material/description: {L('sum_copyready', LANG)}", expanded=copy_clicked):
             st.caption(L("copy_hint", LANG))
             st.code(summary_text, language=None)
 
@@ -483,7 +482,7 @@ with col_chat:
                                 mb=config.MAX_ATTACHMENT_MB))
         b1, b2 = st.columns([1.3, 1])
         with b1:
-            if st.button(f"🎫 {L('generate_ticket', LANG)}", type="primary", use_container_width=True):
+            if st.button(f":material/note_add: {L('generate_ticket', LANG)}", type="primary", use_container_width=True):
                 begin_escalation(reason)
         with b2:
             if api_key and st.button(L("keep_troubleshooting", LANG), use_container_width=True):
@@ -520,7 +519,7 @@ with col_chat:
                     and not ss.feedback_done
     if show_feedback:
         st.divider()
-        st.markdown(f"#### ⭐ {L('feedback_title', LANG)}")
+        st.markdown(f"#### {L('feedback_title', LANG)}")
         with st.form("feedback_form"):
             resolved = st.radio(L("fb_resolved", LANG),
                                 [L("yes", LANG), L("partially", LANG), L("no", LANG)],

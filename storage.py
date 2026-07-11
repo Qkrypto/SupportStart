@@ -210,7 +210,7 @@ def save_ticket(ticket: dict, log: list, intake: dict, language: str):
             language, ticket.get("category"), ticket.get("subcategory"),
             ticket.get("title"), ticket.get("executive_summary"),
             ticket.get("assignment_group"), ticket.get("priority"),
-            ticket.get("risk_level"), ticket.get("confidence_score"),
+            ticket.get("risk_level"), ticket.get("routing_confidence"),
             ticket.get("impact"),
             json.dumps(ticket, ensure_ascii=False),
             json.dumps(log, ensure_ascii=False),
